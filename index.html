@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<title>HerdMate Field Scanner</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
+
+  :root {
+    --bg:#0a0a0a; --panel:#141414; --panel2:#1c1c1c; --border:#2a2a2a;
+    --orange:#e86a1a; --orange-bright:#ff7c28; --orange-dim:#2a1500; --orange-muted:#7a3a0a;
+    --text:#f0f0f0; --muted:#888; --red:#e04040; --red-dim:#3d1010;
+    --green:#4caf50; --green-dim:#1a3d1a;
+  }
+  .day {
+    --bg:#f5f0e8; --panel:#fff; --panel2:#ede8df; --border:#d0c8b8;
+    --orange:#c85a0a; --orange-bright:#e06a10; --orange-dim:#fde8d0; --orange-muted:#f0c090;
+    --text:#1a1a1a; --muted:#666; --red:#c03030; --red-dim:#fdd;
+    --green:#2e7d32; --green-dim:#d0ead0;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; transition:background .3s,color .3s; }
+
+  header { background:var(--bg); border-bottom:3px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:100; }
+  .logo-svg { width:44px; height:44px; flex-shrink:0; }
+  .brand-text { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; letter-spacing:1px; color:var(--orange); line-height:1; }
+  .brand-sub { font-size:0.6rem; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+  .hdr-right { margin-left:auto; }
+  .mode-btn { background:var(--panel2); border:1px solid var(--border); border-radius:20px; width:48px; height:48px; font-size:1.2rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .2s; }
+  .mode-btn:hover { border-color:var(--orange); }
+
+  .pasture-bar { background:var(--orange-dim); border-bottom:2px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .pasture-label { font-family:'Oswald',sans-serif; font-size:0.75rem; text-transform:uppercase; letter-spacing:2px; color:var(--orange); white-space:nowrap; }
+  #pastureInput { background:var(--bg); border:2px solid var(--orange); border-radius:8px; color:var(--text); font-family:'Oswald',sans-serif; font-size:1.1rem; font-weight:600; padding:10px 14px; flex:1; min-width:140px; outline:none; min-height:48px; }
+  #pastureInput::placeholder { color:var(--muted); font-weight:400; font-size:0.9rem; font-family:'Source Sans 3',sans-serif; }
+  .set-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-size:1rem; font-weight:700; letter-spacing:1px; padding:12px 18px; cursor:pointer; min-height:48px; min-width:72px; transition:background .15s; }
+  .set-btn:hover { background:var(--orange-bright); }
+
+  .active-bar { background:var(--panel); border-bottom:1px solid var(--border); padding:10px 14px; display:flex; align-items:center; gap:10px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--orange); flex-shrink:0; }
+  .dot.blink { animation:blink 1.5s infinite; }
+  .dot.idle { background:var(--muted); }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+  .active-name { font-family:'Oswald',sans-serif; font-size:1.1rem; font-weight:600; color:var(--orange); }
+  .active-name.none { color:var(--muted); font-weight:400; font-size:0.9rem; font-family:'Source Sans 3',sans-serif; }
+  .gps-badge { margin-left:auto; font-size:0.7rem; color:var(--muted); }
+  .gps-badge.on { color:var(--green); }
+
+  .scan-zone { margin:12px 14px 8px; background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:14px; transition:all .2s; }
+  .scan-zone.lit { border-color:var(--orange); border-style:solid; background:var(--orange-dim); }
+  .scan-hint { font-size:0.78rem; color:var(--muted); margin-bottom:10px; text-align:center; }
+  .scan-hint.warn { color:var(--orange); }
+  .scan-row { display:flex; gap:8px; }
+  #tagInput { flex:1; background:var(--bg); border:2px solid var(--border); border-radius:8px; color:var(--text); font-family:monospace; font-size:1rem; padding:12px 14px; outline:none; transition:border-color .15s; min-height:52px; }
+  #tagInput:focus { border-color:var(--orange); }
+  #tagInput:disabled { opacity:.35; cursor:not-allowed; }
+  #tagInput::placeholder { color:var(--muted); font-size:.85rem; font-family:'Source Sans 3',sans-serif; }
+  #addBtn { padding:12px 20px; background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1rem; letter-spacing:1px; cursor:pointer; min-height:52px; min-width:72px; transition:background .15s; }
+  #addBtn:hover { background:var(--orange-bright); }
+  #addBtn:disabled { opacity:.35; cursor:not-allowed; }
+
+  .stats-row { display:flex; gap:8px; padding:0 14px 10px; flex-wrap:wrap; }
+  .stat { background:var(--panel); border:1px solid var(--border); border-radius:10px; padding:10px 14px; flex:1; min-width:68px; text-align:center; }
+  .stat .n { font-family:'Oswald',sans-serif; font-size:1.8rem; font-weight:700; line-height:1; color:var(--orange); }
+  .stat .n.red { color:var(--red); }
+  .stat .l { font-size:.6rem; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-top:3px; }
+
+  .tabs { display:flex; gap:6px; padding:0 14px 10px; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .tabs::-webkit-scrollbar { display:none; }
+  .tab { display:flex; align-items:center; gap:5px; padding:7px 14px; border-radius:20px; border:1px solid var(--border); font-size:.78rem; font-weight:600; cursor:pointer; background:var(--panel); color:var(--muted); white-space:nowrap; min-height:38px; transition:all .15s; }
+  .tab:hover { border-color:var(--orange); color:var(--orange); }
+  .tab.on { background:var(--orange-dim); border-color:var(--orange); color:var(--orange); font-weight:700; }
+  .tab .cnt { background:#ffffff18; border-radius:10px; padding:1px 7px; font-size:.7rem; }
+
+  .table-wrap { flex:1; overflow-x:auto; padding:0 14px 90px; -webkit-overflow-scrolling:touch; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  thead th { background:var(--panel); border-bottom:2px solid var(--orange); padding:10px; text-align:left; font-family:'Oswald',sans-serif; font-size:.68rem; text-transform:uppercase; letter-spacing:1.5px; color:var(--orange); white-space:nowrap; position:sticky; top:0; }
+  tbody tr { border-bottom:1px solid var(--border); transition:background .1s; }
+  tbody tr:hover { background:var(--panel); }
+  tbody tr.flash { animation:rowIn .35s ease-out; }
+  @keyframes rowIn { from{background:var(--orange-dim);} to{background:transparent;} }
+  tbody td { padding:11px 10px; vertical-align:middle; }
+  .tag-id { font-family:monospace; font-weight:600; color:var(--text); font-size:.88rem; letter-spacing:.5px; }
+  .chip { display:inline-block; padding:3px 9px; border-radius:4px; font-size:.72rem; font-weight:700; font-family:'Oswald',sans-serif; letter-spacing:.5px; background:var(--orange-dim); color:var(--orange); border:1px solid var(--orange-muted); }
+  .badge { display:inline-block; padding:3px 8px; border-radius:4px; font-size:.65rem; font-weight:700; letter-spacing:.5px; font-family:'Oswald',sans-serif; }
+  .badge.new { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
+  .badge.dup { background:var(--red-dim); color:var(--red); border:1px solid var(--red); }
+  .gps-line { font-size:.65rem; color:var(--muted); display:block; margin-top:2px; }
+  .gps-line.ok { color:var(--green); }
+  .del-btn { background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:4px 8px; border-radius:4px; min-width:36px; min-height:36px; transition:color .15s; }
+  .del-btn:hover { color:var(--red); }
+  .empty { text-align:center; padding:48px 20px; color:var(--muted); }
+  .empty .ico { font-size:3rem; margin-bottom:12px; opacity:.4; }
+  .empty p { font-size:.9rem; line-height:1.6; }
+
+  .export-bar { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:2px solid var(--orange); padding:10px 14px; display:flex; gap:8px; z-index:50; }
+  .exp { flex:1; padding:10px 6px; border-radius:8px; border:1px solid var(--border); cursor:pointer; font-family:'Oswald',sans-serif; font-size:.82rem; font-weight:600; letter-spacing:.5px; background:var(--panel2); color:var(--text); text-align:center; min-height:44px; transition:all .15s; }
+  .exp:hover { border-color:var(--orange); color:var(--orange); }
+  .exp.pri { background:var(--orange); border-color:var(--orange); color:#000; }
+  .exp.pri:hover { background:var(--orange-bright); }
+  .exp.del { color:var(--muted); border-color:transparent; max-width:48px; }
+  .exp.del:hover { color:var(--red); border-color:var(--red); }
+
+  .toast { position:fixed; bottom:76px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; letter-spacing:.5px; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
+  .toast.show { transform:translateX(-50%) translateY(0); }
+  .toast.warn { border-color:var(--red); color:var(--red); }
+</style>
+</head>
+<body id="app">
+
+<header>
+  <!-- SVG cow head inline - no external dependency -->
+  <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <g fill="#e86a1a">
+      <!-- ears -->
+      <ellipse cx="22" cy="38" rx="12" ry="8" transform="rotate(-20 22 38)"/>
+      <ellipse cx="78" cy="38" rx="12" ry="8" transform="rotate(20 78 38)"/>
+      <!-- head -->
+      <ellipse cx="50" cy="52" rx="28" ry="32"/>
+      <!-- snout -->
+      <ellipse cx="50" cy="72" rx="16" ry="10" fill="#c85a0a"/>
+      <!-- nostrils -->
+      <ellipse cx="44" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
+      <ellipse cx="56" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
+      <!-- eyes -->
+      <ellipse cx="38" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
+      <ellipse cx="62" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
+      <ellipse cx="37" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
+      <ellipse cx="61" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
+      <!-- tuft on head -->
+      <ellipse cx="50" cy="24" rx="10" ry="7"/>
+      <ellipse cx="42" cy="22" rx="7" ry="5" transform="rotate(-15 42 22)"/>
+      <ellipse cx="58" cy="22" rx="7" ry="5" transform="rotate(15 58 22)"/>
+    </g>
+  </svg>
+  <div>
+    <div class="brand-text">HerdMate</div>
+    <div class="brand-sub">Field Scanner</div>
+  </div>
+  <div class="hdr-right">
+    <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
+  </div>
+</header>
+
+<div class="pasture-bar">
+  <span class="pasture-label">📍 Pasture</span>
+  <input id="pastureInput" placeholder="Name this pasture..." autocomplete="off" spellcheck="false" />
+  <button class="set-btn" onclick="setPasture()">SET</button>
+</div>
+
+<div class="active-bar">
+  <div class="dot idle" id="scanDot"></div>
+  <div class="active-name none" id="activeName">No pasture selected</div>
+  <div class="gps-badge" id="gpsBadge">📡 acquiring...</div>
+</div>
+
+<div class="scan-zone" id="scanZone">
+  <div class="scan-hint warn" id="scanHint">Set a pasture above to begin scanning</div>
+  <div class="scan-row">
+    <input id="tagInput" type="text" placeholder="Set pasture first..." disabled
+      autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
+    <button id="addBtn" disabled onclick="addTag()">SCAN</button>
+  </div>
+</div>
+
+<div class="stats-row">
+  <div class="stat"><div class="n" id="nTotal">0</div><div class="l">Scanned</div></div>
+  <div class="stat"><div class="n" id="nUnique">0</div><div class="l">Unique</div></div>
+  <div class="stat"><div class="n red" id="nDup">0</div><div class="l">Dups</div></div>
+  <div class="stat"><div class="n" id="nPasture">0</div><div class="l">Pastures</div></div>
+</div>
+
+<div class="tabs" id="tabs"></div>
+
+<div class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th><th>Tag EPC</th><th>Pasture</th><th>Time / GPS</th><th>Status</th><th></th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<div class="export-bar">
+  <button class="exp pri" onclick="exportCSV()">⬇ CSV</button>
+  <button class="exp" onclick="exportByPasture()">⬇ By Pasture</button>
+  <button class="exp" onclick="exportExcel()">⬇ Excel</button>
+  <button class="exp del" onclick="clearAll()">🗑</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  var scans = [];
+  var currentPasture = '';
+  var filterPasture = 'all';
+  var dayMode = false;
+  var lastGPS = null;
+
+  // GPS
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(
+      function(pos) {
+        lastGPS = {
+          lat: pos.coords.latitude.toFixed(6),
+          lng: pos.coords.longitude.toFixed(6),
+          acc: Math.round(pos.coords.accuracy)
+        };
+        var el = document.getElementById('gpsBadge');
+        el.textContent = '📡 GPS +/-' + lastGPS.acc + 'm';
+        el.className = 'gps-badge on';
+      },
+      function() {
+        var el = document.getElementById('gpsBadge');
+        el.textContent = '📡 No GPS';
+        el.className = 'gps-badge';
+        lastGPS = null;
+      },
+      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+    );
+  } else {
+    document.getElementById('gpsBadge').textContent = '📡 No GPS';
+  }
+
+  // Day/Night
+  window.toggleMode = function() {
+    dayMode = !dayMode;
+    document.getElementById('app').className = dayMode ? 'day' : '';
+    document.getElementById('modeBtn').textContent = dayMode ? '🌙' : '☀️';
+  };
+
+  // Pasture
+  document.getElementById('pastureInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); setPasture(); }
+  });
+
+  document.getElementById('tagInput').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); addTag(); }
+  });
+
+  window.setPasture = function() {
+    var name = document.getElementById('pastureInput').value.trim();
+    if (!name) { showToast('Enter a pasture name'); return; }
+    currentPasture = name;
+    document.getElementById('pastureInput').value = '';
+    document.getElementById('activeName').textContent = name;
+    document.getElementById('activeName').className = 'active-name';
+    document.getElementById('scanDot').className = 'dot blink';
+    document.getElementById('scanHint').textContent = 'Ready — scanning: ' + name;
+    document.getElementById('scanHint').className = 'scan-hint';
+    document.getElementById('tagInput').disabled = false;
+    document.getElementById('tagInput').placeholder = 'Scan or type EPC tag...';
+    document.getElementById('addBtn').disabled = false;
+    document.getElementById('tagInput').focus();
+    showToast('Pasture set: ' + name);
+    renderTabs();
+  };
+
+  window.addTag = function() {
+    var raw = document.getElementById('tagInput').value.trim().toUpperCase();
+    if (!raw || !currentPasture) return;
+    var now = new Date();
+    var timeStr = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    var dateStr = now.toLocaleDateString();
+    var isDup = scans.some(function(s) { return s.tag === raw; });
+    var gps = lastGPS ? { lat: lastGPS.lat, lng: lastGPS.lng, acc: lastGPS.acc } : null;
+    scans.unshift({ tag: raw, pasture: currentPasture, time: timeStr, date: dateStr, dup: isDup, gps: gps });
+    document.getElementById('tagInput').value = '';
+    var zone = document.getElementById('scanZone');
+    zone.className = 'scan-zone lit';
+    setTimeout(function() { zone.className = 'scan-zone'; }, 350);
+    renderTable();
+    renderTabs();
+    updateStats();
+    showToast(isDup ? 'DUPLICATE: ' + raw : 'LOGGED: ' + raw, isDup);
+    document.getElementById('tagInput').focus();
+  };
+
+  window.deleteRow = function(idx) {
+    scans.splice(idx, 1);
+    renderTable(); renderTabs(); updateStats();
+  };
+
+  window.setFilter = function(name) {
+    filterPasture = name;
+    renderTable(); renderTabs();
+  };
+
+  function renderTabs() {
+    var pastures = [];
+    scans.forEach(function(s) { if (pastures.indexOf(s.pasture) === -1) pastures.push(s.pasture); });
+    var el = document.getElementById('tabs');
+    if (!pastures.length) { el.innerHTML = ''; return; }
+    var h = '<div class="tab ' + (filterPasture === 'all' ? 'on' : '') + '" onclick="setFilter(\'all\')">All <span class="cnt">' + scans.length + '</span></div>';
+    pastures.forEach(function(p) {
+      var cnt = scans.filter(function(s) { return s.pasture === p; }).length;
+      h += '<div class="tab ' + (filterPasture === p ? 'on' : '') + '" onclick="setFilter(\'' + p.replace(/'/g, '') + '\')">' + esc(p) + ' <span class="cnt">' + cnt + '</span></div>';
+    });
+    el.innerHTML = h;
+  }
+
+  function renderTable() {
+    var tbody = document.getElementById('tbody');
+    var list = filterPasture === 'all' ? scans : scans.filter(function(s) { return s.pasture === filterPasture; });
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="ico">🐄</div><p>' +
+        (scans.length === 0 ? 'Set a pasture above and start scanning.<br>GPS + timestamp logged on every scan.' : 'No tags in this pasture yet.') +
+        '</p></div></td></tr>';
+      return;
+    }
+    var rows = '';
+    list.forEach(function(s, i) {
+      var gpsHtml = s.gps
+        ? '<span class="gps-line ok">GPS: ' + s.gps.lat + ', ' + s.gps.lng + '</span>'
+        : '<span class="gps-line">No GPS</span>';
+      var origIdx = scans.indexOf(s);
+      rows += '<tr class="' + (i === 0 && filterPasture === 'all' ? 'flash' : '') + '">' +
+        '<td style="color:var(--muted);font-size:.75rem">' + (list.length - i) + '</td>' +
+        '<td class="tag-id">' + esc(s.tag) + '</td>' +
+        '<td><span class="chip">' + esc(s.pasture) + '</span></td>' +
+        '<td><span style="font-size:.82rem">' + s.time + '</span>' + gpsHtml + '</td>' +
+        '<td><span class="badge ' + (s.dup ? 'dup' : 'new') + '">' + (s.dup ? 'DUP' : 'NEW') + '</span></td>' +
+        '<td><button class="del-btn" onclick="deleteRow(' + origIdx + ')">✕</button></td>' +
+        '</tr>';
+    });
+    tbody.innerHTML = rows;
+  }
+
+  function updateStats() {
+    document.getElementById('nTotal').textContent = scans.length;
+    var u = {}; scans.forEach(function(s) { u[s.tag] = 1; });
+    document.getElementById('nUnique').textContent = Object.keys(u).length;
+    document.getElementById('nDup').textContent = scans.filter(function(s) { return s.dup; }).length;
+    var p = {}; scans.forEach(function(s) { p[s.pasture] = 1; });
+    document.getElementById('nPasture').textContent = Object.keys(p).length;
+  }
+
+  window.clearAll = function() {
+    if (!scans.length) return;
+    if (!confirm('Clear all ' + scans.length + ' scanned tags?')) return;
+    scans = []; filterPasture = 'all';
+    renderTable(); renderTabs(); updateStats();
+  };
+
+  function makeRows(headers, data) {
+    var rows = [headers];
+    data.forEach(function(s, i) {
+      rows.push([i + 1, s.tag, s.pasture, s.date, s.time,
+        s.gps ? s.gps.lat : '', s.gps ? s.gps.lng : '', s.gps ? s.gps.acc : '',
+        s.dup ? 'DUPLICATE' : 'NEW']);
+    });
+    return rows;
+  }
+
+  var HEADERS = ['#','Tag EPC','Pasture','Date','Time','Latitude','Longitude','GPS Acc(m)','Status'];
+
+  window.exportCSV = function() {
+    if (!scans.length) { showToast('No data'); return; }
+    var rows = makeRows(HEADERS, scans.slice().reverse());
+    dl('herdmate-scan.csv', 'text/csv', rows.map(function(r) {
+      return r.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',');
+    }).join('\n'));
+    showToast('CSV exported!');
+  };
+
+  window.exportByPasture = function() {
+    if (!scans.length) { showToast('No data'); return; }
+    var ps = []; scans.forEach(function(s) { if (ps.indexOf(s.pasture) === -1) ps.push(s.pasture); });
+    var csv = '';
+    ps.forEach(function(p) {
+      var g = scans.filter(function(s) { return s.pasture === p; }).slice().reverse();
+      csv += '"PASTURE: ' + p + '"\n';
+      csv += HEADERS.map(function(h) { return '"' + h + '"'; }).join(',') + '\n';
+      g.forEach(function(s, i) {
+        csv += [i+1, s.tag, s.pasture, s.date, s.time,
+          s.gps ? s.gps.lat : '', s.gps ? s.gps.lng : '', s.gps ? s.gps.acc : '',
+          s.dup ? 'DUPLICATE' : 'NEW']
+          .map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',') + '\n';
+      });
+      csv += '"Total: ' + g.length + '"\n\n';
+    });
+    dl('herdmate-by-pasture.csv', 'text/csv', csv);
+    showToast('Exported by pasture!');
+  };
+
+  window.exportExcel = function() {
+    if (!scans.length) { showToast('No data'); return; }
+    var rows = makeRows(HEADERS, scans.slice().reverse());
+    dl('herdmate-scan.xls', 'application/vnd.ms-excel', rows.map(function(r) { return r.join('\t'); }).join('\n'));
+    showToast('Excel exported!');
+  };
+
+  function dl(name, type, content) {
+    var b = new Blob([content], { type: type });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(b);
+    a.download = name;
+    a.click();
+  }
+
+  function showToast(msg, warn) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast' + (warn ? ' warn' : '') + ' show';
+    clearTimeout(t._timer);
+    t._timer = setTimeout(function() { t.className = 'toast' + (warn ? ' warn' : ''); }, 2200);
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  renderTable();
+})();
+</script>
+</body>
+</html>
