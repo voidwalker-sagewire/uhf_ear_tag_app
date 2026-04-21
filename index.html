@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>HerdMate Field Scanner</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
 
@@ -23,13 +25,58 @@
   * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
   body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; transition:background .3s,color .3s; }
 
+  /* ── SCREENS ── */
+  .screen { display:none; flex-direction:column; min-height:100vh; }
+  .screen.show { display:flex; }
+
+  /* ── LOGIN ── */
+  #loginScreen {
+    align-items:center; justify-content:center; padding:30px;
+    background:var(--bg);
+  }
+  .login-logo svg { width:90px; height:90px; margin-bottom:16px; }
+  .login-brand { font-family:'Oswald',sans-serif; font-size:2.8rem; font-weight:700; color:var(--orange); letter-spacing:2px; }
+  .login-sub { font-size:0.7rem; letter-spacing:3px; color:var(--muted); text-transform:uppercase; margin-bottom:36px; }
+  .login-desc { font-size:0.88rem; color:var(--muted); text-align:center; margin-bottom:28px; line-height:1.7; max-width:300px; }
+  .google-btn { display:flex; align-items:center; gap:12px; background:#fff; border:none; border-radius:10px; padding:14px 28px; font-size:1rem; font-weight:600; color:#333; cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,0.4); transition:all .2s; min-height:54px; }
+  .google-btn:hover { box-shadow:0 4px 20px rgba(0,0,0,0.5); transform:translateY(-1px); }
+  .google-btn svg { width:24px; height:24px; flex-shrink:0; }
+  .login-note { font-size:0.7rem; color:var(--muted); margin-top:20px; text-align:center; max-width:280px; line-height:1.6; }
+
+  /* ── SETUP SCREEN ── */
+  #setupScreen { align-items:center; justify-content:center; padding:24px; background:var(--bg); }
+  .setup-card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:28px 24px; width:100%; max-width:420px; }
+  .setup-title { font-family:'Oswald',sans-serif; font-size:1.4rem; color:var(--orange); margin-bottom:6px; }
+  .setup-desc { font-size:0.82rem; color:var(--muted); margin-bottom:24px; line-height:1.6; }
+  .setup-step { margin-bottom:20px; }
+  .setup-step-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-bottom:6px; font-weight:600; }
+  .setup-step-text { font-size:0.82rem; color:var(--text); line-height:1.6; margin-bottom:8px; }
+  .setup-input { width:100%; background:var(--bg); border:2px solid var(--border); border-radius:8px; color:var(--text); font-family:monospace; font-size:0.88rem; padding:12px 14px; outline:none; transition:border-color .15s; }
+  .setup-input:focus { border-color:var(--orange); }
+  .setup-input::placeholder { color:var(--muted); font-family:'Source Sans 3',sans-serif; font-size:0.82rem; }
+  .setup-btn { width:100%; background:var(--orange); border:none; border-radius:10px; color:#000; font-family:'Oswald',sans-serif; font-size:1.1rem; font-weight:700; letter-spacing:1px; padding:14px; cursor:pointer; margin-top:8px; min-height:52px; transition:background .15s; }
+  .setup-btn:hover { background:var(--orange-bright); }
+  .setup-hint { font-size:0.72rem; color:var(--muted); margin-top:16px; line-height:1.6; text-align:center; }
+  .setup-hint a { color:var(--orange); text-decoration:none; }
+
+  /* ── MAIN APP ── */
   header { background:var(--bg); border-bottom:3px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:100; }
   .logo-svg { width:44px; height:44px; flex-shrink:0; }
   .brand-text { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; letter-spacing:1px; color:var(--orange); line-height:1; }
   .brand-sub { font-size:0.6rem; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
-  .hdr-right { margin-left:auto; }
-  .mode-btn { background:var(--panel2); border:1px solid var(--border); border-radius:20px; width:48px; height:48px; font-size:1.2rem; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .2s; }
-  .mode-btn:hover { border-color:var(--orange); }
+  .hdr-right { margin-left:auto; display:flex; align-items:center; gap:6px; }
+  .mode-btn { background:var(--panel2); border:1px solid var(--border); border-radius:50%; width:44px; height:44px; font-size:1.1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .hdr-menu { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:0.75rem; color:var(--muted); cursor:pointer; min-height:36px; font-family:'Source Sans 3',sans-serif; }
+  .hdr-menu:hover { border-color:var(--orange); color:var(--orange); }
+
+  /* STATUS BARS */
+  .status-bar { padding:7px 14px; display:flex; align-items:center; gap:8px; font-size:0.75rem; font-weight:600; }
+  .status-bar.sheets-ok { background:var(--green-dim); border-bottom:1px solid var(--green); color:var(--green); }
+  .status-bar.sheets-err { background:var(--red-dim); border-bottom:1px solid var(--red); color:var(--red); }
+  .status-bar.sheets-pending { background:var(--orange-dim); border-bottom:1px solid var(--orange); color:var(--orange); }
+  .status-bar.gps-ok { background:#0a1a0a; border-bottom:1px solid var(--green); color:var(--green); }
+  .status-bar.gps-searching { background:#1a1a0a; border-bottom:1px solid var(--amber,#d29922); color:var(--amber,#d29922); }
+  .status-bar.gps-err { background:var(--red-dim); border-bottom:1px solid var(--red); color:var(--red); cursor:pointer; }
 
   .pasture-bar { background:var(--orange-dim); border-bottom:2px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .pasture-label { font-family:'Oswald',sans-serif; font-size:0.75rem; text-transform:uppercase; letter-spacing:2px; color:var(--orange); white-space:nowrap; }
@@ -45,8 +92,6 @@
   @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
   .active-name { font-family:'Oswald',sans-serif; font-size:1.1rem; font-weight:600; color:var(--orange); }
   .active-name.none { color:var(--muted); font-weight:400; font-size:0.9rem; font-family:'Source Sans 3',sans-serif; }
-  .gps-badge { margin-left:auto; font-size:0.7rem; color:var(--muted); }
-  .gps-badge.on { color:var(--green); }
 
   .scan-zone { margin:12px 14px 8px; background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:14px; transition:all .2s; }
   .scan-zone.lit { border-color:var(--orange); border-style:solid; background:var(--orange-dim); }
@@ -67,14 +112,14 @@
   .stat .n.red { color:var(--red); }
   .stat .l { font-size:.6rem; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-top:3px; }
 
-  .tabs { display:flex; gap:6px; padding:0 14px 10px; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+  .tabs { display:flex; gap:6px; padding:0 14px 10px; overflow-x:auto; scrollbar-width:none; }
   .tabs::-webkit-scrollbar { display:none; }
   .tab { display:flex; align-items:center; gap:5px; padding:7px 14px; border-radius:20px; border:1px solid var(--border); font-size:.78rem; font-weight:600; cursor:pointer; background:var(--panel); color:var(--muted); white-space:nowrap; min-height:38px; transition:all .15s; }
   .tab:hover { border-color:var(--orange); color:var(--orange); }
-  .tab.on { background:var(--orange-dim); border-color:var(--orange); color:var(--orange); font-weight:700; }
+  .tab.on { background:var(--orange-dim); border-color:var(--orange); color:var(--orange); }
   .tab .cnt { background:#ffffff18; border-radius:10px; padding:1px 7px; font-size:.7rem; }
 
-  .table-wrap { flex:1; overflow-x:auto; padding:0 14px 90px; -webkit-overflow-scrolling:touch; }
+  .table-wrap { flex:1; overflow-x:auto; padding:0 14px 90px; }
   table { width:100%; border-collapse:collapse; font-size:.85rem; }
   thead th { background:var(--panel); border-bottom:2px solid var(--orange); padding:10px; text-align:left; font-family:'Oswald',sans-serif; font-size:.68rem; text-transform:uppercase; letter-spacing:1.5px; color:var(--orange); white-space:nowrap; position:sticky; top:0; }
   tbody tr { border-bottom:1px solid var(--border); transition:background .1s; }
@@ -82,182 +127,421 @@
   tbody tr.flash { animation:rowIn .35s ease-out; }
   @keyframes rowIn { from{background:var(--orange-dim);} to{background:transparent;} }
   tbody td { padding:11px 10px; vertical-align:middle; }
-  .tag-id { font-family:monospace; font-weight:600; color:var(--text); font-size:.88rem; letter-spacing:.5px; }
-  .chip { display:inline-block; padding:3px 9px; border-radius:4px; font-size:.72rem; font-weight:700; font-family:'Oswald',sans-serif; letter-spacing:.5px; background:var(--orange-dim); color:var(--orange); border:1px solid var(--orange-muted); }
+  .tag-id { font-family:monospace; font-weight:600; color:var(--text); font-size:.88rem; }
+  .chip { display:inline-block; padding:3px 9px; border-radius:4px; font-size:.72rem; font-weight:700; font-family:'Oswald',sans-serif; background:var(--orange-dim); color:var(--orange); border:1px solid var(--orange-muted); }
   .badge { display:inline-block; padding:3px 8px; border-radius:4px; font-size:.65rem; font-weight:700; letter-spacing:.5px; font-family:'Oswald',sans-serif; }
   .badge.new { background:var(--green-dim); color:var(--green); border:1px solid var(--green); }
   .badge.dup { background:var(--red-dim); color:var(--red); border:1px solid var(--red); }
   .gps-line { font-size:.65rem; color:var(--muted); display:block; margin-top:2px; }
   .gps-line.ok { color:var(--green); }
-  .del-btn { background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:4px 8px; border-radius:4px; min-width:36px; min-height:36px; transition:color .15s; }
-  .del-btn:hover { color:var(--red); }
-  .empty { text-align:center; padding:48px 20px; color:var(--muted); }
-  .empty .ico { font-size:3rem; margin-bottom:12px; opacity:.4; }
-  .empty p { font-size:.9rem; line-height:1.6; }
 
   .export-bar { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:2px solid var(--orange); padding:10px 14px; display:flex; gap:8px; z-index:50; }
-  .exp { flex:1; padding:10px 6px; border-radius:8px; border:1px solid var(--border); cursor:pointer; font-family:'Oswald',sans-serif; font-size:.82rem; font-weight:600; letter-spacing:.5px; background:var(--panel2); color:var(--text); text-align:center; min-height:44px; transition:all .15s; }
+  .exp { flex:1; padding:10px 6px; border-radius:8px; border:1px solid var(--border); cursor:pointer; font-family:'Oswald',sans-serif; font-size:.82rem; font-weight:600; background:var(--panel2); color:var(--text); text-align:center; min-height:44px; transition:all .15s; }
   .exp:hover { border-color:var(--orange); color:var(--orange); }
   .exp.pri { background:var(--orange); border-color:var(--orange); color:#000; }
   .exp.pri:hover { background:var(--orange-bright); }
   .exp.del { color:var(--muted); border-color:transparent; max-width:48px; }
   .exp.del:hover { color:var(--red); border-color:var(--red); }
 
-  .toast { position:fixed; bottom:76px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; letter-spacing:.5px; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
+  .toast { position:fixed; bottom:76px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
   .toast.show { transform:translateX(-50%) translateY(0); }
   .toast.warn { border-color:var(--red); color:var(--red); }
+  .toast.good { border-color:var(--green); color:var(--green); }
 </style>
 </head>
 <body id="app">
 
-<header>
-  <!-- SVG cow head inline - no external dependency -->
-  <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-    <g fill="#e86a1a">
-      <!-- ears -->
-      <ellipse cx="22" cy="38" rx="12" ry="8" transform="rotate(-20 22 38)"/>
-      <ellipse cx="78" cy="38" rx="12" ry="8" transform="rotate(20 78 38)"/>
-      <!-- head -->
-      <ellipse cx="50" cy="52" rx="28" ry="32"/>
-      <!-- snout -->
-      <ellipse cx="50" cy="72" rx="16" ry="10" fill="#c85a0a"/>
-      <!-- nostrils -->
-      <ellipse cx="44" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
-      <ellipse cx="56" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
-      <!-- eyes -->
-      <ellipse cx="38" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
-      <ellipse cx="62" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
-      <ellipse cx="37" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
-      <ellipse cx="61" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
-      <!-- tuft on head -->
-      <ellipse cx="50" cy="24" rx="10" ry="7"/>
-      <ellipse cx="42" cy="22" rx="7" ry="5" transform="rotate(-15 42 22)"/>
-      <ellipse cx="58" cy="22" rx="7" ry="5" transform="rotate(15 58 22)"/>
-    </g>
-  </svg>
-  <div>
-    <div class="brand-text">HerdMate</div>
-    <div class="brand-sub">Field Scanner</div>
+<!-- ── LOGIN SCREEN ── -->
+<div class="screen show" id="loginScreen" style="align-items:center;justify-content:center;padding:30px;">
+  <div class="login-logo">
+    <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <g fill="#e86a1a">
+        <ellipse cx="22" cy="38" rx="12" ry="8" transform="rotate(-20 22 38)"/>
+        <ellipse cx="78" cy="38" rx="12" ry="8" transform="rotate(20 78 38)"/>
+        <ellipse cx="50" cy="52" rx="28" ry="32"/>
+        <ellipse cx="50" cy="72" rx="16" ry="10" fill="#c85a0a"/>
+        <ellipse cx="44" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
+        <ellipse cx="56" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
+        <ellipse cx="38" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
+        <ellipse cx="62" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
+        <ellipse cx="37" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
+        <ellipse cx="61" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
+        <ellipse cx="50" cy="24" rx="10" ry="7"/>
+        <ellipse cx="42" cy="22" rx="7" ry="5" transform="rotate(-15 42 22)"/>
+        <ellipse cx="58" cy="22" rx="7" ry="5" transform="rotate(15 58 22)"/>
+      </g>
+    </svg>
   </div>
-  <div class="hdr-right">
-    <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
+  <div class="login-brand">HerdMate</div>
+  <div class="login-sub">Field Scanner</div>
+  <div class="login-desc">Sign in with Google to sync your scans live to your HerdMate spreadsheet.</div>
+  <button class="google-btn" onclick="signIn()">
+    <svg viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+    Sign in with Google
+  </button>
+  <div class="login-note">Your data goes to your own Google Sheet — HerdMate never stores or sees your animal records.</div>
+</div>
+
+<!-- ── SETUP SCREEN ── -->
+<div class="screen" id="setupScreen" style="align-items:center;justify-content:center;padding:20px;">
+  <div class="setup-card">
+    <div class="setup-title">📋 Connect Your Sheet</div>
+    <div class="setup-desc">One-time setup. Enter your Google Sheet ID and the tab name where scans will be logged.</div>
+
+    <div class="setup-step">
+      <div class="setup-step-label">Step 1 — Google Sheet ID</div>
+      <div class="setup-step-text">Open your Google Sheet. Copy the long ID from the URL between <code>/d/</code> and <code>/edit</code></div>
+      <input class="setup-input" id="sheetIdInput" placeholder="e.g. 1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="setup-step">
+      <div class="setup-step-label">Step 2 — Tab Name</div>
+      <div class="setup-step-text">Enter the exact name of the sheet tab where scans should go.</div>
+      <input class="setup-input" id="tabNameInput" placeholder="e.g. UHF_TAG_HEADCOUNT" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <button class="setup-btn" onclick="saveSetup()">Connect & Start Scanning</button>
+    <div class="setup-hint">
+      Make sure your Google account has edit access to that sheet.<br><br>
+      <a href="#" onclick="showSettings()">Change settings later</a> from the app menu.
+    </div>
   </div>
-</header>
-
-<div class="pasture-bar">
-  <span class="pasture-label">📍 Pasture</span>
-  <input id="pastureInput" placeholder="Name this pasture..." autocomplete="off" spellcheck="false" />
-  <button class="set-btn" onclick="setPasture()">SET</button>
 </div>
 
-<div class="active-bar">
-  <div class="dot idle" id="scanDot"></div>
-  <div class="active-name none" id="activeName">No pasture selected</div>
-  <div class="gps-badge" id="gpsBadge">📡 acquiring...</div>
-</div>
+<!-- ── MAIN APP SCREEN ── -->
+<div class="screen" id="appScreen">
 
-<div class="scan-zone" id="scanZone">
-  <div class="scan-hint warn" id="scanHint">Set a pasture above to begin scanning</div>
-  <div class="scan-row">
-    <input id="tagInput" type="text" placeholder="Set pasture first..." disabled
-      autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
-    <button id="addBtn" disabled onclick="addTag()">SCAN</button>
+  <header>
+    <svg class="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+      <g fill="#e86a1a">
+        <ellipse cx="22" cy="38" rx="12" ry="8" transform="rotate(-20 22 38)"/>
+        <ellipse cx="78" cy="38" rx="12" ry="8" transform="rotate(20 78 38)"/>
+        <ellipse cx="50" cy="52" rx="28" ry="32"/>
+        <ellipse cx="50" cy="72" rx="16" ry="10" fill="#c85a0a"/>
+        <ellipse cx="44" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
+        <ellipse cx="56" cy="73" rx="3.5" ry="2.5" fill="#0a0a0a"/>
+        <ellipse cx="38" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
+        <ellipse cx="62" cy="50" rx="5" ry="5.5" fill="#0a0a0a"/>
+        <ellipse cx="37" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
+        <ellipse cx="61" cy="49" rx="1.5" ry="2" fill="#fff" opacity=".5"/>
+        <ellipse cx="50" cy="24" rx="10" ry="7"/>
+        <ellipse cx="42" cy="22" rx="7" ry="5" transform="rotate(-15 42 22)"/>
+        <ellipse cx="58" cy="22" rx="7" ry="5" transform="rotate(15 58 22)"/>
+      </g>
+    </svg>
+    <div>
+      <div class="brand-text">HerdMate</div>
+      <div class="brand-sub">Field Scanner</div>
+    </div>
+    <div class="hdr-right">
+      <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
+      <button class="hdr-menu" onclick="showSettings()">⚙ Settings</button>
+      <button class="hdr-menu" onclick="signOut()">Sign Out</button>
+    </div>
+  </header>
+
+  <!-- Sheets status -->
+  <div class="status-bar sheets-pending" id="sheetsBar">⏳ Connecting to Google Sheets...</div>
+
+  <!-- GPS status — tappable to retry -->
+  <div class="status-bar gps-searching" id="gpsBar" onclick="retryGPS()">📡 Acquiring GPS... (tap to retry)</div>
+
+  <div class="pasture-bar">
+    <span class="pasture-label">📍 Pasture</span>
+    <input id="pastureInput" placeholder="Name this pasture..." autocomplete="off" spellcheck="false" />
+    <button class="set-btn" onclick="setPasture()">SET</button>
   </div>
-</div>
 
-<div class="stats-row">
-  <div class="stat"><div class="n" id="nTotal">0</div><div class="l">Scanned</div></div>
-  <div class="stat"><div class="n" id="nUnique">0</div><div class="l">Unique</div></div>
-  <div class="stat"><div class="n red" id="nDup">0</div><div class="l">Dups</div></div>
-  <div class="stat"><div class="n" id="nPasture">0</div><div class="l">Pastures</div></div>
-</div>
+  <div class="active-bar">
+    <div class="dot idle" id="scanDot"></div>
+    <div class="active-name none" id="activeName">No pasture selected</div>
+  </div>
 
-<div class="tabs" id="tabs"></div>
+  <div class="scan-zone" id="scanZone">
+    <div class="scan-hint warn" id="scanHint">Set a pasture above to begin scanning</div>
+    <div class="scan-row">
+      <input id="tagInput" type="text" placeholder="Set pasture first..." disabled
+        autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
+      <button id="addBtn" disabled onclick="addTag()">SCAN</button>
+    </div>
+  </div>
 
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th>#</th><th>Tag EPC</th><th>Pasture</th><th>Time / GPS</th><th>Status</th><th></th>
-      </tr>
-    </thead>
-    <tbody id="tbody"></tbody>
-  </table>
-</div>
+  <div class="stats-row">
+    <div class="stat"><div class="n" id="nTotal">0</div><div class="l">Scanned</div></div>
+    <div class="stat"><div class="n" id="nUnique">0</div><div class="l">Unique</div></div>
+    <div class="stat"><div class="n red" id="nDup">0</div><div class="l">Dups</div></div>
+    <div class="stat"><div class="n" id="nPasture">0</div><div class="l">Pastures</div></div>
+  </div>
 
-<div class="export-bar">
-  <button class="exp pri" onclick="exportCSV()">⬇ CSV</button>
-  <button class="exp" onclick="exportByPasture()">⬇ By Pasture</button>
-  <button class="exp" onclick="exportExcel()">⬇ Excel</button>
-  <button class="exp del" onclick="clearAll()">🗑</button>
+  <div class="tabs" id="tabs"></div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>#</th><th>Tag EPC</th><th>Pasture</th><th>Time / GPS</th><th>Status</th><th>☁</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="export-bar">
+    <button class="exp pri" onclick="exportCSV()">⬇ CSV</button>
+    <button class="exp" onclick="exportByPasture()">⬇ By Pasture</button>
+    <button class="exp" onclick="exportExcel()">⬇ Excel</button>
+    <button class="exp del" onclick="clearAll()">🗑</button>
+  </div>
+
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
 (function() {
-  var scans = [];
-  var currentPasture = '';
-  var filterPasture = 'all';
-  var dayMode = false;
-  var lastGPS = null;
+  // ── CONFIG — only the OAuth client ID lives here, nothing sensitive ──
+  var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
+  var SCOPES    = 'https://www.googleapis.com/auth/spreadsheets';
 
-  // GPS
-  if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(
+  // ── STATE ──
+  var scans         = [];
+  var currentPasture = '';
+  var filterPasture  = 'all';
+  var dayMode        = false;
+  var lastGPS        = null;
+  var gpsWatcher     = null;
+  var accessToken    = null;
+  var tokenClient    = null;
+  var sheetId        = '';
+  var tabName        = '';
+
+  // ── LOAD SAVED SETTINGS ──
+  function loadSettings() {
+    sheetId = localStorage.getItem('hm_sheet_id') || '';
+    tabName = localStorage.getItem('hm_tab_name') || '';
+  }
+
+  function saveSettings(sid, tab) {
+    localStorage.setItem('hm_sheet_id', sid);
+    localStorage.setItem('hm_tab_name', tab);
+    sheetId = sid;
+    tabName = tab;
+  }
+
+  // ── SCREEN ROUTING ──
+  function showScreen(id) {
+    var screens = ['loginScreen','setupScreen','appScreen'];
+    screens.forEach(function(s) {
+      var el = document.getElementById(s);
+      el.className = s === id ? 'screen show' : 'screen';
+      if (s === 'loginScreen') {
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        el.style.padding = '30px';
+      }
+      if (s === 'setupScreen') {
+        el.style.alignItems = 'center';
+        el.style.justifyContent = 'center';
+        el.style.padding = '20px';
+      }
+    });
+  }
+
+  // ── GPS ──
+  function startGPS() {
+    if (!navigator.geolocation) {
+      setGPSBar('err', '📡 GPS not available on this device');
+      return;
+    }
+    setGPSBar('searching', '📡 Acquiring GPS... (tap to retry)');
+    if (gpsWatcher !== null) navigator.geolocation.clearWatch(gpsWatcher);
+    gpsWatcher = navigator.geolocation.watchPosition(
       function(pos) {
         lastGPS = {
           lat: pos.coords.latitude.toFixed(6),
           lng: pos.coords.longitude.toFixed(6),
           acc: Math.round(pos.coords.accuracy)
         };
-        var el = document.getElementById('gpsBadge');
-        el.textContent = '📡 GPS +/-' + lastGPS.acc + 'm';
-        el.className = 'gps-badge on';
+        setGPSBar('ok', '📡 GPS locked +/-' + lastGPS.acc + 'm — ' + lastGPS.lat + ', ' + lastGPS.lng);
       },
-      function() {
-        var el = document.getElementById('gpsBadge');
-        el.textContent = '📡 No GPS';
-        el.className = 'gps-badge';
+      function(err) {
         lastGPS = null;
+        if (err.code === 1) {
+          setGPSBar('err', '📡 GPS blocked — tap to enable location in browser settings');
+        } else {
+          setGPSBar('err', '📡 GPS unavailable — tap to retry');
+        }
       },
-      { enableHighAccuracy: true, maximumAge: 10000, timeout: 15000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
     );
-  } else {
-    document.getElementById('gpsBadge').textContent = '📡 No GPS';
   }
 
-  // Day/Night
+  function setGPSBar(state, msg) {
+    var el = document.getElementById('gpsBar');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'status-bar gps-' + state;
+  }
+
+  window.retryGPS = function() { startGPS(); };
+
+  // ── AUTH ──
+  window.signIn = function() {
+    if (tokenClient) {
+      tokenClient.requestAccessToken({ prompt: '' });
+    } else {
+      showToast('Loading...', false);
+    }
+  };
+
+  window.signOut = function() {
+    if (accessToken) {
+      google.accounts.oauth2.revoke(accessToken, function(){});
+      accessToken = null;
+    }
+    scans = [];
+    showScreen('loginScreen');
+  };
+
+  function onSignedIn() {
+    loadSettings();
+    if (!sheetId || !tabName) {
+      showScreen('setupScreen');
+    } else {
+      showScreen('appScreen');
+      startGPS();
+      ensureSheetHeaders();
+    }
+  }
+
+  // ── SETUP ──
+  window.saveSetup = function() {
+    var sid = document.getElementById('sheetIdInput').value.trim();
+    var tab = document.getElementById('tabNameInput').value.trim();
+    if (!sid) { showToast('Enter your Sheet ID', true); return; }
+    if (!tab) { showToast('Enter your tab name', true); return; }
+    saveSettings(sid, tab);
+    showScreen('appScreen');
+    startGPS();
+    ensureSheetHeaders();
+  };
+
+  window.showSettings = function() {
+    document.getElementById('sheetIdInput').value = sheetId;
+    document.getElementById('tabNameInput').value = tabName;
+    showScreen('setupScreen');
+  };
+
+  // ── SHEETS ──
+  function setSheetsBar(state, msg) {
+    var el = document.getElementById('sheetsBar');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'status-bar sheets-' + state;
+  }
+
+  function ensureSheetHeaders() {
+    if (!accessToken || !sheetId || !tabName) return;
+    setSheetsBar('pending', '⏳ Connecting to Google Sheets...');
+    var url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(tabName) + '!A1:K1';
+    fetch(url, { headers: { Authorization: 'Bearer ' + accessToken } })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.values || !data.values[0] || data.values[0].length < 3) {
+          writeHeaders();
+        } else {
+          setSheetsBar('ok', '✅ Connected — ' + tabName);
+        }
+      })
+      .catch(function() {
+        setSheetsBar('err', '❌ Cannot reach Google Sheets — check Sheet ID');
+      });
+  }
+
+  function writeHeaders() {
+    var headers = [['Timestamp','Date','Time','Tag EPC','Pasture','Latitude','Longitude','GPS Accuracy (m)','Status','Session','Logged By']];
+    var url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(tabName) + '!A1:K1?valueInputOption=RAW';
+    fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: headers })
+    }).then(function(r) {
+      if (r.ok) {
+        setSheetsBar('ok', '✅ Connected — ' + tabName);
+      } else {
+        setSheetsBar('err', '❌ Could not write to sheet — check permissions');
+      }
+    }).catch(function() {
+      setSheetsBar('err', '❌ Sheet write failed');
+    });
+  }
+
+  function writeToSheet(scan) {
+    if (!accessToken || !sheetId || !tabName) { scan.synced = false; renderTable(); return; }
+    scan.synced = null;
+    renderTable();
+    var now = new Date();
+    var row = [[
+      now.toISOString(),
+      scan.date,
+      scan.time,
+      scan.tag,
+      scan.pasture,
+      scan.gps ? scan.gps.lat : '',
+      scan.gps ? scan.gps.lng : '',
+      scan.gps ? scan.gps.acc : '',
+      scan.dup ? 'DUPLICATE' : 'NEW',
+      'Head Count',
+      'HerdMate Scanner'
+    ]];
+    var url = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(tabName) + '!A:K:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS';
+    fetch(url, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: row })
+    }).then(function(r) {
+      scan.synced = r.ok;
+      if (r.ok) {
+        setSheetsBar('ok', '✅ Synced — ' + tabName);
+      } else {
+        setSheetsBar('err', '❌ Sync failed — saved locally');
+      }
+      renderTable();
+    }).catch(function() {
+      scan.synced = false;
+      setSheetsBar('err', '❌ Offline — saved locally');
+      renderTable();
+    });
+  }
+
+  // ── DAY/NIGHT ──
   window.toggleMode = function() {
     dayMode = !dayMode;
     document.getElementById('app').className = dayMode ? 'day' : '';
     document.getElementById('modeBtn').textContent = dayMode ? '🌙' : '☀️';
   };
 
-  // Pasture
+  // ── PASTURE ──
   document.getElementById('pastureInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); setPasture(); }
   });
-
   document.getElementById('tagInput').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); addTag(); }
   });
 
   window.setPasture = function() {
     var name = document.getElementById('pastureInput').value.trim();
-    if (!name) { showToast('Enter a pasture name'); return; }
+    if (!name) { showToast('Enter a pasture name', true); return; }
     currentPasture = name;
     document.getElementById('pastureInput').value = '';
     document.getElementById('activeName').textContent = name;
     document.getElementById('activeName').className = 'active-name';
     document.getElementById('scanDot').className = 'dot blink';
-    document.getElementById('scanHint').textContent = 'Ready — scanning: ' + name;
+    document.getElementById('scanHint').textContent = 'Ready — scanning into: ' + name;
     document.getElementById('scanHint').className = 'scan-hint';
     document.getElementById('tagInput').disabled = false;
     document.getElementById('tagInput').placeholder = 'Scan or type EPC tag...';
     document.getElementById('addBtn').disabled = false;
     document.getElementById('tagInput').focus();
-    showToast('Pasture set: ' + name);
+    showToast('Pasture: ' + name);
     renderTabs();
   };
 
@@ -268,8 +552,9 @@
     var timeStr = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
     var dateStr = now.toLocaleDateString();
     var isDup = scans.some(function(s) { return s.tag === raw; });
-    var gps = lastGPS ? { lat: lastGPS.lat, lng: lastGPS.lng, acc: lastGPS.acc } : null;
-    scans.unshift({ tag: raw, pasture: currentPasture, time: timeStr, date: dateStr, dup: isDup, gps: gps });
+    var gps = lastGPS ? { lat:lastGPS.lat, lng:lastGPS.lng, acc:lastGPS.acc } : null;
+    var scan = { tag:raw, pasture:currentPasture, time:timeStr, date:dateStr, dup:isDup, gps:gps, synced:null };
+    scans.unshift(scan);
     document.getElementById('tagInput').value = '';
     var zone = document.getElementById('scanZone');
     zone.className = 'scan-zone lit';
@@ -278,54 +563,49 @@
     renderTabs();
     updateStats();
     showToast(isDup ? 'DUPLICATE: ' + raw : 'LOGGED: ' + raw, isDup);
+    writeToSheet(scan);
     document.getElementById('tagInput').focus();
   };
 
-  window.deleteRow = function(idx) {
-    scans.splice(idx, 1);
-    renderTable(); renderTabs(); updateStats();
-  };
-
-  window.setFilter = function(name) {
-    filterPasture = name;
-    renderTable(); renderTabs();
-  };
+  window.setFilter = function(name) { filterPasture = name; renderTable(); renderTabs(); };
 
   function renderTabs() {
     var pastures = [];
-    scans.forEach(function(s) { if (pastures.indexOf(s.pasture) === -1) pastures.push(s.pasture); });
+    scans.forEach(function(s) { if (pastures.indexOf(s.pasture)===-1) pastures.push(s.pasture); });
     var el = document.getElementById('tabs');
-    if (!pastures.length) { el.innerHTML = ''; return; }
-    var h = '<div class="tab ' + (filterPasture === 'all' ? 'on' : '') + '" onclick="setFilter(\'all\')">All <span class="cnt">' + scans.length + '</span></div>';
+    if (!pastures.length) { el.innerHTML=''; return; }
+    var h = '<div class="tab '+(filterPasture==='all'?'on':'')+'" onclick="setFilter(\'all\')">All <span class="cnt">'+scans.length+'</span></div>';
     pastures.forEach(function(p) {
-      var cnt = scans.filter(function(s) { return s.pasture === p; }).length;
-      h += '<div class="tab ' + (filterPasture === p ? 'on' : '') + '" onclick="setFilter(\'' + p.replace(/'/g, '') + '\')">' + esc(p) + ' <span class="cnt">' + cnt + '</span></div>';
+      var cnt = scans.filter(function(s){return s.pasture===p;}).length;
+      h += '<div class="tab '+(filterPasture===p?'on':'')+'" onclick="setFilter(\''+p.replace(/'/g,'')+'\')">'+esc(p)+' <span class="cnt">'+cnt+'</span></div>';
     });
     el.innerHTML = h;
   }
 
   function renderTable() {
     var tbody = document.getElementById('tbody');
-    var list = filterPasture === 'all' ? scans : scans.filter(function(s) { return s.pasture === filterPasture; });
+    var list = filterPasture==='all' ? scans : scans.filter(function(s){return s.pasture===filterPasture;});
     if (!list.length) {
-      tbody.innerHTML = '<tr><td colspan="6"><div class="empty"><div class="ico">🐄</div><p>' +
-        (scans.length === 0 ? 'Set a pasture above and start scanning.<br>GPS + timestamp logged on every scan.' : 'No tags in this pasture yet.') +
-        '</p></div></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6"><div style="text-align:center;padding:48px 20px;color:var(--muted)"><div style="font-size:2.8rem;margin-bottom:12px;opacity:.4">🐄</div><p style="font-size:.9rem;line-height:1.6">'+(scans.length===0?'Set a pasture above and start scanning.<br>Every scan syncs live to your Google Sheet.':'No tags in this pasture yet.')+'</p></div></td></tr>';
       return;
     }
     var rows = '';
-    list.forEach(function(s, i) {
+    list.forEach(function(s,i) {
       var gpsHtml = s.gps
-        ? '<span class="gps-line ok">GPS: ' + s.gps.lat + ', ' + s.gps.lng + '</span>'
+        ? '<span class="gps-line ok">📍 '+s.gps.lat+', '+s.gps.lng+' (±'+s.gps.acc+'m)</span>'
         : '<span class="gps-line">No GPS</span>';
-      var origIdx = scans.indexOf(s);
-      rows += '<tr class="' + (i === 0 && filterPasture === 'all' ? 'flash' : '') + '">' +
-        '<td style="color:var(--muted);font-size:.75rem">' + (list.length - i) + '</td>' +
-        '<td class="tag-id">' + esc(s.tag) + '</td>' +
-        '<td><span class="chip">' + esc(s.pasture) + '</span></td>' +
-        '<td><span style="font-size:.82rem">' + s.time + '</span>' + gpsHtml + '</td>' +
-        '<td><span class="badge ' + (s.dup ? 'dup' : 'new') + '">' + (s.dup ? 'DUP' : 'NEW') + '</span></td>' +
-        '<td><button class="del-btn" onclick="deleteRow(' + origIdx + ')">✕</button></td>' +
+      var syncHtml = s.synced===null
+        ? '<span style="color:var(--orange);font-size:.8rem">⏳</span>'
+        : s.synced
+          ? '<span style="color:var(--green);font-size:.8rem">✅</span>'
+          : '<span style="color:var(--red);font-size:.75rem" title="Saved locally">⚠️</span>';
+      rows += '<tr class="'+(i===0&&filterPasture==='all'?'flash':'')+'">'+
+        '<td style="color:var(--muted);font-size:.75rem">'+(list.length-i)+'</td>'+
+        '<td class="tag-id">'+esc(s.tag)+'</td>'+
+        '<td><span class="chip">'+esc(s.pasture)+'</span></td>'+
+        '<td><span style="font-size:.82rem">'+s.time+'</span>'+gpsHtml+'</td>'+
+        '<td><span class="badge '+(s.dup?'dup':'new')+'">'+(s.dup?'DUP':'NEW')+'</span></td>'+
+        '<td>'+syncHtml+'</td>'+
         '</tr>';
     });
     tbody.innerHTML = rows;
@@ -333,87 +613,92 @@
 
   function updateStats() {
     document.getElementById('nTotal').textContent = scans.length;
-    var u = {}; scans.forEach(function(s) { u[s.tag] = 1; });
+    var u={}; scans.forEach(function(s){u[s.tag]=1;});
     document.getElementById('nUnique').textContent = Object.keys(u).length;
-    document.getElementById('nDup').textContent = scans.filter(function(s) { return s.dup; }).length;
-    var p = {}; scans.forEach(function(s) { p[s.pasture] = 1; });
+    document.getElementById('nDup').textContent = scans.filter(function(s){return s.dup;}).length;
+    var p={}; scans.forEach(function(s){p[s.pasture]=1;});
     document.getElementById('nPasture').textContent = Object.keys(p).length;
   }
 
   window.clearAll = function() {
     if (!scans.length) return;
-    if (!confirm('Clear all ' + scans.length + ' scanned tags?')) return;
-    scans = []; filterPasture = 'all';
+    if (!confirm('Clear '+scans.length+' tags from this view?\n\nNote: Data already synced to Google Sheets is kept there.')) return;
+    scans=[]; filterPasture='all';
     renderTable(); renderTabs(); updateStats();
   };
 
-  function makeRows(headers, data) {
-    var rows = [headers];
-    data.forEach(function(s, i) {
-      rows.push([i + 1, s.tag, s.pasture, s.date, s.time,
-        s.gps ? s.gps.lat : '', s.gps ? s.gps.lng : '', s.gps ? s.gps.acc : '',
-        s.dup ? 'DUPLICATE' : 'NEW']);
+  var HEADERS = ['#','Tag EPC','Pasture','Date','Time','Latitude','Longitude','GPS Acc(m)','Status'];
+  function makeRows(data) {
+    var rows=[HEADERS];
+    data.forEach(function(s,i){
+      rows.push([i+1,s.tag,s.pasture,s.date,s.time,
+        s.gps?s.gps.lat:'',s.gps?s.gps.lng:'',s.gps?s.gps.acc:'',
+        s.dup?'DUPLICATE':'NEW']);
     });
     return rows;
   }
 
-  var HEADERS = ['#','Tag EPC','Pasture','Date','Time','Latitude','Longitude','GPS Acc(m)','Status'];
-
   window.exportCSV = function() {
-    if (!scans.length) { showToast('No data'); return; }
-    var rows = makeRows(HEADERS, scans.slice().reverse());
-    dl('herdmate-scan.csv', 'text/csv', rows.map(function(r) {
-      return r.map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',');
-    }).join('\n'));
+    if (!scans.length){showToast('No data');return;}
+    var rows=makeRows(scans.slice().reverse());
+    dl('herdmate-scan.csv','text/csv',rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n'));
     showToast('CSV exported!');
   };
 
   window.exportByPasture = function() {
-    if (!scans.length) { showToast('No data'); return; }
-    var ps = []; scans.forEach(function(s) { if (ps.indexOf(s.pasture) === -1) ps.push(s.pasture); });
-    var csv = '';
-    ps.forEach(function(p) {
-      var g = scans.filter(function(s) { return s.pasture === p; }).slice().reverse();
-      csv += '"PASTURE: ' + p + '"\n';
-      csv += HEADERS.map(function(h) { return '"' + h + '"'; }).join(',') + '\n';
-      g.forEach(function(s, i) {
-        csv += [i+1, s.tag, s.pasture, s.date, s.time,
-          s.gps ? s.gps.lat : '', s.gps ? s.gps.lng : '', s.gps ? s.gps.acc : '',
-          s.dup ? 'DUPLICATE' : 'NEW']
-          .map(function(c) { return '"' + String(c).replace(/"/g, '""') + '"'; }).join(',') + '\n';
-      });
-      csv += '"Total: ' + g.length + '"\n\n';
+    if (!scans.length){showToast('No data');return;}
+    var ps=[]; scans.forEach(function(s){if(ps.indexOf(s.pasture)===-1)ps.push(s.pasture);});
+    var csv='';
+    ps.forEach(function(p){
+      var g=scans.filter(function(s){return s.pasture===p;}).slice().reverse();
+      csv+='"PASTURE: '+p+'"\n'+HEADERS.map(function(h){return '"'+h+'"';}).join(',')+'\n';
+      g.forEach(function(s,i){csv+=[i+1,s.tag,s.pasture,s.date,s.time,s.gps?s.gps.lat:'',s.gps?s.gps.lng:'',s.gps?s.gps.acc:'',s.dup?'DUPLICATE':'NEW'].map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',')+'\n';});
+      csv+='"Total: '+g.length+'"\n\n';
     });
-    dl('herdmate-by-pasture.csv', 'text/csv', csv);
+    dl('herdmate-by-pasture.csv','text/csv',csv);
     showToast('Exported by pasture!');
   };
 
   window.exportExcel = function() {
-    if (!scans.length) { showToast('No data'); return; }
-    var rows = makeRows(HEADERS, scans.slice().reverse());
-    dl('herdmate-scan.xls', 'application/vnd.ms-excel', rows.map(function(r) { return r.join('\t'); }).join('\n'));
+    if (!scans.length){showToast('No data');return;}
+    var rows=makeRows(scans.slice().reverse());
+    dl('herdmate-scan.xls','application/vnd.ms-excel',rows.map(function(r){return r.join('\t');}).join('\n'));
     showToast('Excel exported!');
   };
 
-  function dl(name, type, content) {
-    var b = new Blob([content], { type: type });
-    var a = document.createElement('a');
-    a.href = URL.createObjectURL(b);
-    a.download = name;
-    a.click();
+  function dl(name,type,content){
+    var b=new Blob([content],{type:type});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(b);a.download=name;a.click();
   }
 
-  function showToast(msg, warn) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'toast' + (warn ? ' warn' : '') + ' show';
+  function showToast(msg,warn) {
+    var t=document.getElementById('toast');
+    t.textContent=msg;
+    t.className='toast'+(warn?' warn':'')+' show';
     clearTimeout(t._timer);
-    t._timer = setTimeout(function() { t.className = 'toast' + (warn ? ' warn' : ''); }, 2200);
+    t._timer=setTimeout(function(){t.className='toast'+(warn?' warn':'');},2200);
   }
 
-  function esc(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  // ── INIT GOOGLE AUTH ──
+  window.addEventListener('load', function() {
+    var check = setInterval(function() {
+      if (window.google && window.google.accounts) {
+        clearInterval(check);
+        tokenClient = google.accounts.oauth2.initTokenClient({
+          client_id: CLIENT_ID,
+          scope: SCOPES,
+          callback: function(response) {
+            if (response.error) { showToast('Sign in failed', true); return; }
+            accessToken = response.access_token;
+            onSignedIn();
+          }
+        });
+      }
+    }, 200);
+  });
 
   renderTable();
 })();
