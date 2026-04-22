@@ -214,12 +214,22 @@
 <!-- CHROME REQUIRED -->
 <div class="screen" id="chromeScreen" style="align-items:center;justify-content:center;padding:30px;text-align:center;">
   <div class="chrome-icon">🌐</div>
-  <div class="chrome-title">Chrome Required</div>
-  <div class="chrome-desc">HerdMate uses Bluetooth to connect to your R6 scanner. This requires Google Chrome. Tap below to open HerdMate in Chrome.</div>
-  <button class="chrome-btn" onclick="openInChrome()">
-    Open in Chrome
-  </button>
-  <p style="font-size:0.7rem;color:var(--muted);margin-top:16px;">If Chrome is already your browser, tap the button above or copy the URL manually.</p>
+  <div class="chrome-title">Open in Chrome</div>
+  <div class="chrome-desc">HerdMate uses Bluetooth to connect to your R6 scanner. Bluetooth requires Google Chrome.</div>
+  <div style="background:#1a1a1a;border:2px solid #4285F4;border-radius:10px;padding:16px;margin-bottom:20px;width:100%;max-width:320px;">
+    <div style="font-size:0.68rem;text-transform:uppercase;letter-spacing:1px;color:#4285F4;margin-bottom:8px;font-family:'Oswald',sans-serif;">Copy this URL</div>
+    <div id="currentUrl" style="font-family:monospace;font-size:0.9rem;color:#fff;word-break:break-all;margin-bottom:12px;">scanner.herdmate.ag</div>
+    <button onclick="copyUrl()" style="background:#4285F4;border:none;border-radius:8px;color:#fff;font-family:'Oswald',sans-serif;font-size:0.9rem;font-weight:700;padding:10px 20px;cursor:pointer;width:100%;min-height:44px;">📋 Copy URL</button>
+  </div>
+  <div style="font-size:0.82rem;color:var(--muted);line-height:1.8;max-width:300px;">
+    <strong style="color:var(--text);">How to open in Chrome:</strong><br>
+    1. Tap Copy URL above<br>
+    2. Open Chrome on your phone<br>
+    3. Paste the URL and go
+  </div>
+  <div style="margin-top:20px;font-size:0.7rem;color:var(--muted);max-width:280px;line-height:1.5;">
+    Already in Chrome? The app will load automatically next time.
+  </div>
 </div>
 
 <!-- LOGIN -->
@@ -439,6 +449,37 @@
   var bleConnected = false;
   var bleBuffer = '';
 
+  // ── OFFLINE QUEUE ──
+  var QUEUE_KEY = 'hm_offline_queue';
+  function queueLoad() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]'); } catch(e) { return []; } }
+  function queueSave(q) { try { localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); } catch(e){} }
+  function queueAdd(record,mode) { var q=queueLoad(); q.push({record:record,mode:mode,addedAt:Date.now()}); queueSave(q); }
+  function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
+
+  function flushOfflineQueue() {
+    var q=queueLoad();
+    if(!q.length||!accessToken||!sheetId) return;
+    var item=q[0]; var record=item.record; var mode=item.mode;
+    var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
+    var row;
+    if(mode==='Bovine Beacon'){
+      row=[[record.date,record.time,record.tag,record.targetTag||'',record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
+    } else {
+      row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,record.firstGPS?record.firstGPS.lat:'',record.firstGPS?record.firstGPS.lng:'',record.firstGPS?record.firstGPS.acc:'',record.readCount,'Head Count',operationName,'HerdMate Scanner']];
+    }
+    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+      method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
+    }).then(function(r){
+      if(r.ok){
+        queueRemove(0);
+        var key=record.tag+'__'+record.pasture;
+        if(uniqueTags[key]){uniqueTags[key].synced=true;renderTable();}
+        var remaining=queueLoad().length;
+        setSheetsBar('ok',remaining>0?'✅ Syncing offline — '+remaining+' left':'✅ All data synced — '+operationName);
+      }
+    }).catch(function(){});
+  }
+
   // ── CHROME CHECK ──
   function isChrome() {
     var ua = navigator.userAgent;
@@ -449,6 +490,24 @@
   function isBrave() {
     return navigator.brave && navigator.brave.isBrave;
   }
+
+  window.copyUrl = function() {
+    var url = window.location.href;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(function() {
+        showToast('URL copied! Open Chrome and paste it.');
+      });
+    } else {
+      // Fallback
+      var el = document.createElement('textarea');
+      el.value = url;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      showToast('URL copied! Open Chrome and paste it.');
+    }
+  };
 
   window.openInChrome = function() {
     var url = window.location.href;
@@ -657,6 +716,9 @@
     showScreen('appScreen');
     startGPS();
     setSheetsBar('ok','✅ Connected — '+operationName);
+    // Start offline queue flush — every 30 seconds
+    flushOfflineQueue();
+    setInterval(flushOfflineQueue, 30000);
   }
 
   // CREATE WORKSPACE
@@ -718,7 +780,7 @@
   // SHEETS
   function setSheetsBar(state,msg){var el=document.getElementById('sheetsBar');if(!el)return;el.textContent=msg;el.className='status-bar sheets-'+state;}
   function writeToSheet(record, mode) {
-    if(!accessToken||!sheetId){record.synced=false;renderTable();return;}
+    if(!accessToken||!sheetId){record.synced=false;queueAdd(record,mode);renderTable();return;}
     var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
     var row;
     if(mode==='Bovine Beacon'){
@@ -729,11 +791,18 @@
     fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     }).then(function(r){
-      if(record.synced!==undefined){record.synced=r.ok;renderTable();}
-      setSheetsBar(r.ok?'ok':'err',r.ok?'✅ Synced — '+operationName:'❌ Sync failed');
+      if(r.ok){
+        if(record.synced!==undefined){record.synced=true;renderTable();}
+        setSheetsBar('ok','✅ Synced — '+operationName);
+      } else {
+        if(record.synced!==undefined){record.synced=false;renderTable();}
+        queueAdd(record,mode);
+        setSheetsBar('err','❌ Sync failed — saved offline');
+      }
     }).catch(function(){
       if(record.synced!==undefined){record.synced=false;renderTable();}
-      setSheetsBar('err','❌ Offline — saved locally');
+      queueAdd(record,mode);
+      setSheetsBar('err','❌ Offline — saved to device');
     });
   }
 
@@ -952,6 +1021,10 @@
 
   // INIT
   window.addEventListener('load', function() {
+    // Set URL display on chrome screen
+    var urlEl = document.getElementById('currentUrl');
+    if (urlEl) urlEl.textContent = window.location.href;
+
     // Check browser
     if (isBrave && isBrave()) {
       showScreen('chromeScreen');
