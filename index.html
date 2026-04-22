@@ -194,13 +194,15 @@
 
   /* EXPORT BAR */
   .export-bar { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:2px solid var(--orange); padding:10px 14px; display:flex; gap:8px; z-index:50; }
-  .exp { flex:1; padding:10px 6px; border-radius:8px; border:1px solid var(--border); cursor:pointer; font-family:'Oswald',sans-serif; font-size:.82rem; font-weight:600; background:var(--panel2); color:var(--text); text-align:center; min-height:44px; transition:all .15s; }
-  .exp:hover { border-color:var(--orange); color:var(--orange); }
+  .exp { flex:1; padding:10px 6px; border-radius:8px; border:2px solid var(--orange-muted); cursor:pointer; font-family:'Oswald',sans-serif; font-size:.82rem; font-weight:600; background:#1e0e00; color:var(--orange); text-align:center; min-height:48px; transition:all .15s; }
+  .exp:hover { border-color:var(--orange); background:var(--orange-dim); }
+  .exp:active { background:var(--orange); color:#000; }
   .exp.pri { background:var(--orange); border-color:var(--orange); color:#000; }
-  .exp.del { color:var(--muted); border-color:transparent; max-width:48px; }
-  .exp.del:hover { color:var(--red); border-color:var(--red); }
+  .exp.pri:hover { background:var(--orange-bright); }
+  .exp.del { color:var(--red); border-color:#5a1a1a; background:#1a0a0a; max-width:52px; }
+  .exp.del:hover { border-color:var(--red); background:var(--red-dim); }
 
-  .toast { position:fixed; bottom:76px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
+  .toast { position:fixed; bottom:140px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
   .toast.show { transform:translateX(-50%) translateY(0); }
   .toast.warn { border-color:var(--red); color:var(--red); }
   .toast.good { border-color:var(--green); color:var(--green); }
@@ -988,4 +990,3 @@
 </script>
 </body>
 </html>
-
