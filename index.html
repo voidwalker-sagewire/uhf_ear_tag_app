@@ -202,6 +202,22 @@
   .exp.del { color:var(--red); border-color:#5a1a1a; background:#1a0a0a; max-width:52px; }
   .exp.del:hover { border-color:var(--red); background:var(--red-dim); }
 
+  /* PASTURE MANAGER MODAL */
+  .modal-overlay { position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.85); z-index:200; display:flex; align-items:flex-end; justify-content:center; }
+  .modal-sheet { background:var(--panel); border-radius:16px 16px 0 0; width:100%; max-width:500px; padding:20px; max-height:80vh; overflow-y:auto; }
+  .modal-title { font-family:'Oswald',sans-serif; font-size:1.2rem; color:var(--orange); margin-bottom:4px; }
+  .modal-desc { font-size:0.75rem; color:var(--muted); margin-bottom:16px; }
+  .pasture-item { display:flex; align-items:center; gap:8px; padding:10px; background:var(--panel2); border-radius:8px; margin-bottom:8px; border:1px solid var(--border); }
+  .pasture-item input { background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-family:'Oswald',sans-serif; font-size:0.9rem; padding:6px 10px; outline:none; flex:1; min-width:0; }
+  .pasture-item input:focus { border-color:var(--orange); }
+  .pasture-item .target-input { width:60px; text-align:center; }
+  .pasture-item-label { font-size:0.65rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px; }
+  .modal-add-btn { width:100%; background:var(--orange-dim); border:2px dashed var(--orange-muted); border-radius:8px; color:var(--orange); font-family:'Oswald',sans-serif; font-size:0.9rem; font-weight:600; padding:12px; cursor:pointer; margin-top:4px; min-height:44px; }
+  .modal-save-btn { width:100%; background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-size:1rem; font-weight:700; padding:14px; cursor:pointer; margin-top:12px; min-height:48px; }
+  .modal-close { float:right; background:none; border:none; color:var(--muted); font-size:1.4rem; cursor:pointer; padding:0 4px; }
+  .del-pasture { background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:4px 6px; border-radius:4px; }
+  .del-pasture:hover { color:var(--red); }
+
   .toast { position:fixed; bottom:140px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
   .toast.show { transform:translateX(-50%) translateY(0); }
   .toast.warn { border-color:var(--red); color:var(--red); }
@@ -306,6 +322,7 @@
       <div class="brand-sub" id="operationName">Field Scanner</div>
     </div>
     <div class="hdr-right">
+      <button class="mode-btn" id="lockBtn" onclick="toggleRotation()" title="Lock screen rotation">🔄</button>
       <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
       <button class="hdr-menu" onclick="signOut()">Sign Out</button>
     </div>
@@ -334,6 +351,12 @@
       <span class="pasture-label">📍 Pasture</span>
       <input id="pastureInput" placeholder="Name this pasture..." autocomplete="off" spellcheck="false" />
       <button class="set-btn" onclick="setPasture()">SET</button>
+    </div>
+    <!-- SAVED PASTURES -->
+    <div id="savedPasturesBar" style="padding:8px 14px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;border-bottom:1px solid var(--border);background:var(--panel2);">
+      <span style="font-size:0.65rem;text-transform:uppercase;letter-spacing:1px;color:var(--muted);white-space:nowrap;">Saved:</span>
+      <div id="savedPasturesList" style="display:flex;gap:6px;flex-wrap:wrap;flex:1;"></div>
+      <button onclick="showPastureManager()" style="background:none;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:0.75rem;padding:4px 10px;cursor:pointer;min-height:30px;font-family:'Oswald',sans-serif;white-space:nowrap;">✏️ Edit</button>
     </div>
     <div class="active-bar">
       <div class="dot idle" id="scanDot"></div>
@@ -716,7 +739,7 @@
     showScreen('appScreen');
     startGPS();
     setSheetsBar('ok','✅ Connected — '+operationName);
-    // Start offline queue flush — every 30 seconds
+    renderSavedPastures();
     flushOfflineQueue();
     setInterval(flushOfflineQueue, 30000);
   }
@@ -1018,6 +1041,147 @@
     t._timer=setTimeout(function(){t.className='toast'+(type==='blue'?' blue':type==='good'?' good':type===true||type==='warn'?' warn':'');},2500);
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  // ── ROTATION LOCK ──
+  var rotationLocked = false;
+  window.toggleRotation = function() {
+    if (!screen.orientation || !screen.orientation.lock) {
+      showToast('Rotation lock not supported on this device', true);
+      return;
+    }
+    if (rotationLocked) {
+      screen.orientation.unlock();
+      rotationLocked = false;
+      document.getElementById('lockBtn').textContent = '🔄';
+      document.getElementById('lockBtn').style.borderColor = '';
+      showToast('Screen rotation unlocked');
+    } else {
+      var orientation = window.innerWidth > window.innerHeight ? 'landscape' : 'portrait';
+      screen.orientation.lock(orientation).then(function() {
+        rotationLocked = true;
+        document.getElementById('lockBtn').textContent = '🔒';
+        document.getElementById('lockBtn').style.borderColor = 'var(--orange)';
+        showToast('Screen rotation locked');
+      }).catch(function() {
+        showToast('Could not lock rotation', true);
+      });
+    }
+  };
+
+  // ── SAVED PASTURES ──
+  var PASTURES_KEY = 'hm_saved_pastures';
+
+  function savedPasturesLoad() {
+    try { return JSON.parse(localStorage.getItem(PASTURES_KEY) || '[]'); } catch(e) { return []; }
+  }
+  function savedPasturesSave(list) {
+    try { localStorage.setItem(PASTURES_KEY, JSON.stringify(list)); } catch(e) {}
+  }
+
+  function renderSavedPastures() {
+    var list = savedPasturesLoad();
+    var el = document.getElementById('savedPasturesList');
+    if (!el) return;
+    if (!list.length) {
+      el.innerHTML = '<span style="font-size:0.72rem;color:var(--muted);font-style:italic;">None saved — tap Edit to add</span>';
+      return;
+    }
+    el.innerHTML = list.map(function(p, i) {
+      return '<button onclick="quickSetPasture(' + i + ')" style="background:var(--orange-dim);border:1px solid var(--orange-muted);border-radius:6px;color:var(--orange);font-family:Oswald,sans-serif;font-size:0.75rem;font-weight:600;padding:5px 10px;cursor:pointer;min-height:30px;white-space:nowrap;">' +
+        esc(p.name) + (p.target ? ' <span style="opacity:0.7;font-size:0.65rem;">(' + p.target + ')</span>' : '') +
+        '</button>';
+    }).join('');
+  }
+
+  window.quickSetPasture = function(idx) {
+    var list = savedPasturesLoad();
+    var p = list[idx];
+    if (!p) return;
+    document.getElementById('pastureInput').value = p.name;
+    if (p.target) document.getElementById('targetInput').value = p.target;
+    setPasture();
+    if (p.target) updateHeadcountBanner();
+  };
+
+  window.showPastureManager = function() {
+    var list = savedPasturesLoad();
+    var existing = document.getElementById('pastureManagerModal');
+    if (existing) existing.remove();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'pastureManagerModal';
+    overlay.onclick = function(e) { if (e.target === overlay) closePastureManager(); };
+
+    var sheet = document.createElement('div');
+    sheet.className = 'modal-sheet';
+
+    function buildRows() {
+      var current = savedPasturesLoad();
+      return current.map(function(p, i) {
+        return '<div class="pasture-item" id="pitem_' + i + '">' +
+          '<div style="flex:1">' +
+            '<div class="pasture-item-label">Pasture Name</div>' +
+            '<input type="text" value="' + esc(p.name) + '" id="pname_' + i + '" placeholder="Pasture name" />' +
+          '</div>' +
+          '<div style="width:70px">' +
+            '<div class="pasture-item-label">Target</div>' +
+            '<input type="number" value="' + (p.target || '') + '" id="ptarget_' + i + '" placeholder="—" class="target-input" min="1" max="9999" />' +
+          '</div>' +
+          '<button class="del-pasture" onclick="deletePastureItem(' + i + ')">🗑</button>' +
+        '</div>';
+      }).join('');
+    }
+
+    sheet.innerHTML =
+      '<button class="modal-close" onclick="closePastureManager()">✕</button>' +
+      '<div class="modal-title">📍 Saved Pastures</div>' +
+      '<div class="modal-desc">Tap a pasture to set it instantly. Edit names and target head counts here.</div>' +
+      '<div id="pastureItemsList">' + buildRows() + '</div>' +
+      '<button class="modal-add-btn" onclick="addPastureItem()">+ Add Pasture</button>' +
+      '<button class="modal-save-btn" onclick="savePastureManager()">Save Pastures</button>';
+
+    overlay.appendChild(sheet);
+    document.body.appendChild(overlay);
+  };
+
+  window.addPastureItem = function() {
+    var list = savedPasturesLoad();
+    list.push({ name: '', target: '' });
+    savedPasturesSave(list);
+    showPastureManager();
+  };
+
+  window.deletePastureItem = function(idx) {
+    var list = savedPasturesLoad();
+    list.splice(idx, 1);
+    savedPasturesSave(list);
+    showPastureManager();
+  };
+
+  window.savePastureManager = function() {
+    var list = savedPasturesLoad();
+    var newList = [];
+    list.forEach(function(p, i) {
+      var nameEl = document.getElementById('pname_' + i);
+      var targetEl = document.getElementById('ptarget_' + i);
+      if (nameEl && nameEl.value.trim()) {
+        newList.push({
+          name: nameEl.value.trim(),
+          target: targetEl ? (parseInt(targetEl.value) || '') : ''
+        });
+      }
+    });
+    savedPasturesSave(newList);
+    closePastureManager();
+    renderSavedPastures();
+    showToast('Pastures saved!');
+  };
+
+  window.closePastureManager = function() {
+    var el = document.getElementById('pastureManagerModal');
+    if (el) el.remove();
+  };
 
   // INIT
   window.addEventListener('load', function() {
