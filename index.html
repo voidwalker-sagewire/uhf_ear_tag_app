@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <title>HerdMate Field Scanner</title>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -23,23 +22,29 @@
     --green:#2e7d32; --green-dim:#d0ead0; --blue:#1a6abf; --blue-dim:#d0e4f8;
   }
   * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
-  body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; transition:background .3s,color .3s; }
+  body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; }
 
   .screen { display:none; flex-direction:column; min-height:100vh; }
   .screen.show { display:flex; }
 
-  /* ── LOGIN ── */
+  /* CHROME REQUIRED */
+  #chromeScreen { align-items:center; justify-content:center; padding:30px; background:var(--bg); text-align:center; }
+  .chrome-icon { font-size:4rem; margin-bottom:20px; }
+  .chrome-title { font-family:'Oswald',sans-serif; font-size:1.8rem; color:var(--orange); margin-bottom:12px; }
+  .chrome-desc { font-size:0.88rem; color:var(--muted); margin-bottom:28px; line-height:1.7; max-width:300px; }
+  .chrome-btn { display:flex; align-items:center; justify-content:center; gap:10px; background:#4285F4; border:none; border-radius:10px; padding:16px 28px; font-size:1rem; font-weight:700; color:#fff; cursor:pointer; min-height:54px; width:100%; max-width:300px; font-family:'Oswald',sans-serif; letter-spacing:1px; }
+
+  /* LOGIN */
   #loginScreen { align-items:center; justify-content:center; padding:30px; background:var(--bg); }
   .login-logo svg { width:90px; height:90px; margin-bottom:16px; }
   .login-brand { font-family:'Oswald',sans-serif; font-size:2.8rem; font-weight:700; color:var(--orange); letter-spacing:2px; }
   .login-sub { font-size:0.7rem; letter-spacing:3px; color:var(--muted); text-transform:uppercase; margin-bottom:36px; }
   .login-desc { font-size:0.88rem; color:var(--muted); text-align:center; margin-bottom:28px; line-height:1.7; max-width:300px; }
   .google-btn { display:flex; align-items:center; gap:12px; background:#fff; border:none; border-radius:10px; padding:14px 28px; font-size:1rem; font-weight:600; color:#333; cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,0.4); transition:all .2s; min-height:54px; }
-  .google-btn:hover { box-shadow:0 4px 20px rgba(0,0,0,0.5); transform:translateY(-1px); }
   .google-btn svg { width:24px; height:24px; flex-shrink:0; }
   .login-note { font-size:0.7rem; color:var(--muted); margin-top:20px; text-align:center; max-width:280px; line-height:1.6; }
 
-  /* ── ONBOARDING ── */
+  /* ONBOARDING */
   #onboardScreen { align-items:center; justify-content:center; padding:24px; background:var(--bg); }
   .onboard-card { background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:32px 24px; width:100%; max-width:420px; text-align:center; }
   .onboard-icon { font-size:3rem; margin-bottom:12px; }
@@ -48,7 +53,6 @@
   .onboard-input { width:100%; background:var(--bg); border:2px solid var(--orange); border-radius:10px; color:var(--text); font-family:'Oswald',sans-serif; font-size:1.2rem; font-weight:600; padding:14px 16px; outline:none; text-align:center; margin-bottom:16px; min-height:54px; }
   .onboard-input::placeholder { color:var(--muted); font-weight:400; font-size:1rem; font-family:'Source Sans 3',sans-serif; }
   .onboard-btn { width:100%; background:var(--orange); border:none; border-radius:10px; color:#000; font-family:'Oswald',sans-serif; font-size:1.2rem; font-weight:700; letter-spacing:1px; padding:16px; cursor:pointer; min-height:56px; transition:background .15s; }
-  .onboard-btn:hover { background:var(--orange-bright); }
   .onboard-btn:disabled { opacity:0.5; cursor:not-allowed; }
   .onboard-progress { margin-top:20px; font-size:0.82rem; color:var(--muted); line-height:1.8; }
   .onboard-progress .step { display:flex; align-items:center; gap:8px; justify-content:center; margin:4px 0; }
@@ -56,7 +60,7 @@
   .onboard-progress .step.active { color:var(--orange); }
   .onboard-note { font-size:0.7rem; color:var(--muted); margin-top:20px; line-height:1.6; }
 
-  /* ── HEADER ── */
+  /* HEADER */
   header { background:var(--bg); border-bottom:3px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:100; }
   .logo-svg { width:44px; height:44px; flex-shrink:0; }
   .brand-text { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; letter-spacing:1px; color:var(--orange); line-height:1; }
@@ -74,6 +78,10 @@
   .status-bar.gps-ok { background:#0a1a0a; border-bottom:1px solid var(--green); color:var(--green); }
   .status-bar.gps-searching { background:#1a1a0a; border-bottom:1px solid #d29922; color:#d29922; }
   .status-bar.gps-err { background:var(--red-dim); border-bottom:1px solid var(--red); color:var(--red); cursor:pointer; }
+  .status-bar.ble-connected { background:#0a1a2a; border-bottom:1px solid var(--blue); color:var(--blue); }
+  .status-bar.ble-disconnected { background:var(--panel2); border-bottom:1px solid var(--border); color:var(--muted); cursor:pointer; }
+  .status-bar.ble-scanning { background:#0a1a2a; border-bottom:1px solid var(--blue); color:var(--blue); animation:blePulse 1s infinite; }
+  @keyframes blePulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
   /* MODE SELECTOR */
   .mode-selector { display:flex; gap:0; margin:10px 14px 0; border-radius:10px; overflow:hidden; border:2px solid var(--border); }
@@ -87,6 +95,8 @@
   .audio-btn { padding:5px 12px; border-radius:6px; border:1px solid var(--border); background:var(--panel); color:var(--muted); font-size:0.72rem; font-family:'Oswald',sans-serif; cursor:pointer; transition:all .15s; min-height:32px; }
   .audio-btn.on { border-color:var(--green); color:var(--green); background:var(--green-dim); }
   .audio-btn.vib.on { border-color:var(--blue); color:var(--blue); background:var(--blue-dim); }
+  .audio-btn.ble-btn { border-color:var(--blue); color:var(--blue); }
+  .audio-btn.ble-btn.connected { background:var(--blue-dim); }
 
   /* PASTURE BAR */
   .pasture-bar { background:var(--orange-dim); border-bottom:2px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
@@ -96,7 +106,6 @@
   #pastureInput { background:var(--bg); border:2px solid var(--orange); border-radius:8px; color:var(--text); font-family:'Oswald',sans-serif; font-size:1.1rem; font-weight:600; padding:10px 14px; flex:1; min-width:140px; outline:none; min-height:48px; }
   #pastureInput::placeholder { color:var(--muted); font-weight:400; font-size:0.9rem; font-family:'Source Sans 3',sans-serif; }
   .set-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-size:1rem; font-weight:700; letter-spacing:1px; padding:12px 18px; cursor:pointer; min-height:48px; min-width:72px; transition:background .15s; }
-  .set-btn:hover { background:var(--orange-bright); }
   .set-btn.bb { background:var(--blue); color:#fff; }
 
   /* ACTIVE BAR */
@@ -121,7 +130,6 @@
   #tagInput:disabled { opacity:.35; cursor:not-allowed; }
   #tagInput::placeholder { color:var(--muted); font-size:.85rem; font-family:'Source Sans 3',sans-serif; }
   #addBtn { padding:12px 20px; background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1rem; letter-spacing:1px; cursor:pointer; min-height:52px; min-width:72px; transition:background .15s; }
-  #addBtn:hover { background:var(--orange-bright); }
   #addBtn:disabled { opacity:.35; cursor:not-allowed; }
 
   /* HEAD COUNT BANNER */
@@ -145,12 +153,12 @@
   .stat .n.green { color:var(--green); }
   .stat .l { font-size:.6rem; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin-top:3px; }
 
-  /* BB STATUS */
+  /* BB */
   .bb-target-bar { background:var(--blue-dim); border-bottom:2px solid var(--blue); padding:10px 14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
   .bb-target-label { font-family:'Oswald',sans-serif; font-size:0.75rem; text-transform:uppercase; letter-spacing:2px; color:var(--blue); white-space:nowrap; }
   #bbTagInput { background:var(--bg); border:2px solid var(--blue); border-radius:8px; color:var(--text); font-family:monospace; font-size:1rem; font-weight:600; padding:10px 14px; flex:1; min-width:160px; outline:none; min-height:48px; }
   #bbTagInput::placeholder { color:var(--muted); font-weight:400; font-size:0.85rem; font-family:'Source Sans 3',sans-serif; }
-  .bb-set-btn { background:var(--blue); border:none; border-radius:8px; color:#fff; font-family:'Oswald',sans-serif; font-size:1rem; font-weight:700; padding:12px 18px; cursor:pointer; min-height:48px; min-width:72px; transition:background .15s; }
+  .bb-set-btn { background:var(--blue); border:none; border-radius:8px; color:#fff; font-family:'Oswald',sans-serif; font-size:1rem; font-weight:700; padding:12px 18px; cursor:pointer; min-height:48px; min-width:72px; }
   .bb-status { margin:12px 14px 8px; border-radius:12px; padding:20px; text-align:center; transition:all .3s; background:var(--panel); border:2px dashed var(--border); }
   .bb-status.searching { border-color:var(--blue); border-style:solid; background:var(--blue-dim); animation:bbPulse 1.5s infinite; }
   .bb-status.found { border-color:var(--green); border-style:solid; background:var(--green-dim); animation:none; }
@@ -201,8 +209,19 @@
 </head>
 <body id="app">
 
+<!-- CHROME REQUIRED -->
+<div class="screen" id="chromeScreen" style="align-items:center;justify-content:center;padding:30px;text-align:center;">
+  <div class="chrome-icon">🌐</div>
+  <div class="chrome-title">Chrome Required</div>
+  <div class="chrome-desc">HerdMate uses Bluetooth to connect to your R6 scanner. This requires Google Chrome. Tap below to open HerdMate in Chrome.</div>
+  <button class="chrome-btn" onclick="openInChrome()">
+    Open in Chrome
+  </button>
+  <p style="font-size:0.7rem;color:var(--muted);margin-top:16px;">If Chrome is already your browser, tap the button above or copy the URL manually.</p>
+</div>
+
 <!-- LOGIN -->
-<div class="screen show" id="loginScreen" style="align-items:center;justify-content:center;padding:30px;">
+<div class="screen" id="loginScreen" style="align-items:center;justify-content:center;padding:30px;">
   <div class="login-logo">
     <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
       <g fill="#e86a1a">
@@ -224,12 +243,12 @@
   </div>
   <div class="login-brand">HerdMate</div>
   <div class="login-sub">Field Scanner</div>
-  <div class="login-desc">Sign in with Google to get started. HerdMate will create your personal data sheet automatically.</div>
+  <div class="login-desc">Sign in with Google to sync your scans live to your HerdMate spreadsheet.</div>
   <button class="google-btn" onclick="signIn()">
     <svg viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
     Sign in with Google
   </button>
-  <div class="login-note">Your scan data stays in your own Google Drive. HerdMate never stores your animal records.</div>
+  <div class="login-note">Your data goes to your own Google Drive. HerdMate never stores your animal records.</div>
 </div>
 
 <!-- ONBOARDING -->
@@ -237,7 +256,7 @@
   <div class="onboard-card">
     <div class="onboard-icon">🐄</div>
     <div class="onboard-title">Welcome to HerdMate</div>
-    <div class="onboard-desc">What's the name of your operation? We'll set up your personal HerdMate workspace in Google Drive automatically.</div>
+    <div class="onboard-desc">What's the name of your operation? We'll set up your HerdMate workspace in Google Drive automatically.</div>
     <input class="onboard-input" id="operationInput" placeholder="e.g. Dutton Cattle Company" autocomplete="off" spellcheck="false" maxlength="50" />
     <button class="onboard-btn" id="onboardBtn" onclick="createWorkspace()">Set Up My HerdMate →</button>
     <div class="onboard-progress" id="onboardProgress" style="display:none">
@@ -246,7 +265,7 @@
       <div class="step" id="stepHeaders">⏳ Writing column headers...</div>
       <div class="step" id="stepDone">⏳ Almost ready...</div>
     </div>
-    <div class="onboard-note">This is a one-time setup. A Google Sheet named "HerdMate — [Your Operation]" will appear in your Google Drive.</div>
+    <div class="onboard-note">A Google Sheet named "HerdMate — [Your Operation]" will appear in your Google Drive.</div>
   </div>
 </div>
 
@@ -281,7 +300,9 @@
   </header>
 
   <div class="status-bar sheets-pending" id="sheetsBar">⏳ Connecting...</div>
-  <div class="status-bar gps-searching" id="gpsBar" onclick="retryGPS()">📡 Acquiring GPS... (tap to retry)</div>
+  <div class="status-bar gps-searching" id="gpsBar" onclick="retryGPS()">📡 Acquiring GPS...</div>
+  <!-- BLE STATUS BAR — tap to connect R6 -->
+  <div class="status-bar ble-disconnected" id="bleBar" onclick="connectR6()">📶 Tap to connect R6 scanner</div>
 
   <div class="mode-selector">
     <button class="mode-tab active-hc" id="tabHC" onclick="switchMode('hc')">🐄 Head Count</button>
@@ -386,10 +407,13 @@
 <script>
 (function() {
   var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
-  // Include Drive scope to create sheets + Sheets scope to write data
   var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
-  var HC_TAB = 'Head Count';
   var YEAR = new Date().getFullYear();
+
+  // Nordic UART Service UUIDs
+  var NORDIC_UART_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  var NORDIC_UART_RX_CHAR = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // write to device
+  var NORDIC_UART_TX_CHAR = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // receive from device
 
   // STATE
   var uniqueTags = {};
@@ -407,7 +431,29 @@
   var audioScanOn = false, audioAlertOn = true, vibOn = true, audioCtx = null;
   var lastScanTime = {};
 
-  // AUDIO
+  // BLE STATE
+  var bleDevice = null;
+  var bleChar = null;
+  var bleConnected = false;
+  var bleBuffer = '';
+
+  // ── CHROME CHECK ──
+  function isChrome() {
+    var ua = navigator.userAgent;
+    return /Chrome/.test(ua) && !/Chromium|Edg|OPR|Brave/.test(ua);
+  }
+
+  // Check for Brave specifically
+  function isBrave() {
+    return navigator.brave && navigator.brave.isBrave;
+  }
+
+  window.openInChrome = function() {
+    var url = window.location.href;
+    window.location.href = 'googlechrome://' + url.replace(/^https?:\/\//, '');
+  };
+
+  // ── AUDIO ──
   function getAudioCtx() {
     if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
     return audioCtx;
@@ -453,7 +499,95 @@
     else if (type==='vib') { vibOn=!vibOn; var b3=document.getElementById('vibBtn'); b3.textContent=(vibOn?'📳':'📴')+' Vibrate'; b3.className='audio-btn vib'+(vibOn?' on':''); }
   };
 
-  // EPC VALIDATION & DEBOUNCE
+  // ── BLE R6 CONNECTION ──
+  window.connectR6 = async function() {
+    if (!navigator.bluetooth) {
+      showToast('Bluetooth not available — use Chrome', true);
+      return;
+    }
+    if (bleConnected) {
+      // Disconnect
+      if (bleDevice && bleDevice.gatt.connected) {
+        bleDevice.gatt.disconnect();
+      }
+      setBleBar('disconnected', '📶 Tap to connect R6 scanner');
+      bleConnected = false;
+      bleDevice = null;
+      bleChar = null;
+      return;
+    }
+    try {
+      setBleBar('scanning', '📶 Searching for R6...');
+      bleDevice = await navigator.bluetooth.requestDevice({
+        filters: [
+          { namePrefix: 'Nordic' },
+          { namePrefix: 'CW' },
+          { namePrefix: 'Chainway' },
+          { namePrefix: 'HR6' }
+        ],
+        optionalServices: [NORDIC_UART_SERVICE]
+      });
+      setBleBar('scanning', '📶 Connecting to ' + bleDevice.name + '...');
+      bleDevice.addEventListener('gattserverdisconnected', onBleDisconnected);
+      var server = await bleDevice.gatt.connect();
+      var service = await server.getPrimaryService(NORDIC_UART_SERVICE);
+      bleChar = await service.getCharacteristic(NORDIC_UART_TX_CHAR);
+      await bleChar.startNotifications();
+      bleChar.addEventListener('characteristicvaluechanged', onBleData);
+      bleConnected = true;
+      setBleBar('connected', '📶 R6 Connected — ' + bleDevice.name);
+      showToast('R6 Connected!', false);
+      if (vibOn && navigator.vibrate) navigator.vibrate([100, 50, 100]);
+    } catch(e) {
+      setBleBar('disconnected', '📶 Tap to connect R6 scanner');
+      if (e.name !== 'NotFoundError') {
+        showToast('Connection failed: ' + e.message, true);
+      }
+    }
+  };
+
+  function onBleDisconnected() {
+    bleConnected = false;
+    bleDevice = null;
+    bleChar = null;
+    setBleBar('disconnected', '📶 R6 disconnected — tap to reconnect');
+    showToast('R6 disconnected', true);
+  }
+
+  function onBleData(event) {
+    var value = event.target.value;
+    var decoder = new TextDecoder('utf-8');
+    var chunk = decoder.decode(value);
+    bleBuffer += chunk;
+    // R6 sends EPC followed by newline or carriage return
+    var lines = bleBuffer.split(/[\r\n]+/);
+    bleBuffer = lines.pop(); // keep incomplete line
+    lines.forEach(function(line) {
+      var epc = line.trim().toUpperCase();
+      if (epc) processIncomingTag(epc);
+    });
+  }
+
+  function setBleBar(state, msg) {
+    var el = document.getElementById('bleBar');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'status-bar ble-' + state;
+  }
+
+  // ── PROCESS INCOMING TAG (from BLE or keyboard wedge) ──
+  function processIncomingTag(raw) {
+    if (!isValidCattleTag(raw)) return;
+    if (isDebounceDuplicate(raw)) return;
+    if (currentMode === 'hc') {
+      if (!currentPasture) return;
+      processHCTag(raw);
+    } else if (currentMode === 'bb') {
+      processBBScan(raw);
+    }
+  }
+
+  // EPC VALIDATION
   function isValidCattleTag(epc) {
     if (!epc||epc.length<8||epc.length>30) return false;
     if (!/^[A-Z0-9]+$/.test(epc)) return false;
@@ -466,23 +600,17 @@
     lastScanTime[epc]=now; return false;
   }
 
-  // STORAGE — save sheet ID locally so returning users skip onboarding
-  function loadLocal() {
-    sheetId = localStorage.getItem('hm_sheet_id')||'';
-    operationName = localStorage.getItem('hm_operation')||'';
-  }
-  function saveLocal(sid, opName) {
-    localStorage.setItem('hm_sheet_id', sid);
-    localStorage.setItem('hm_operation', opName);
-    sheetId=sid; operationName=opName;
-  }
+  // SETTINGS
+  function loadLocal() { sheetId=localStorage.getItem('hm_sheet_id')||''; operationName=localStorage.getItem('hm_operation')||''; }
+  function saveLocal(sid, opName) { localStorage.setItem('hm_sheet_id',sid); localStorage.setItem('hm_operation',opName); sheetId=sid; operationName=opName; }
 
   // SCREENS
   function showScreen(id) {
-    ['loginScreen','onboardScreen','appScreen'].forEach(function(s){
+    ['chromeScreen','loginScreen','onboardScreen','appScreen'].forEach(function(s){
       var el=document.getElementById(s);
       el.className = s===id ? 'screen show' : 'screen';
-      if (s==='loginScreen'||s==='onboardScreen') { el.style.alignItems='center'; el.style.justifyContent='center'; el.style.padding='24px'; }
+      if (s==='loginScreen'||s==='chromeScreen') { el.style.alignItems='center'; el.style.justifyContent='center'; el.style.padding='30px'; }
+      if (s==='onboardScreen') { el.style.alignItems='center'; el.style.justifyContent='center'; el.style.padding='24px'; }
     });
   }
 
@@ -493,17 +621,16 @@
     document.getElementById('tabBB').className='mode-tab'+(mode==='bb'?' active-bb':'');
     document.getElementById('hcMode').style.display=mode==='hc'?'block':'none';
     document.getElementById('bbMode').style.display=mode==='bb'?'flex':'none';
-    if (mode==='bb'&&bbActive) setTimeout(function(){document.getElementById('bbScanInput').focus();},100);
   };
 
   // GPS
   function startGPS() {
     if (!navigator.geolocation){setGPSBar('err','📡 GPS not available');return;}
-    setGPSBar('searching','📡 Acquiring GPS... (tap to retry)');
+    setGPSBar('searching','📡 Acquiring GPS...');
     if (gpsWatcher!==null) navigator.geolocation.clearWatch(gpsWatcher);
     gpsWatcher=navigator.geolocation.watchPosition(
       function(pos){ lastGPS={lat:pos.coords.latitude.toFixed(6),lng:pos.coords.longitude.toFixed(6),acc:Math.round(pos.coords.accuracy)}; setGPSBar('ok','📡 GPS +/-'+lastGPS.acc+'m — '+lastGPS.lat+', '+lastGPS.lng); },
-      function(err){ lastGPS=null; setGPSBar('err',err.code===1?'📡 GPS blocked — tap to enable':'📡 GPS unavailable — tap to retry'); },
+      function(err){ lastGPS=null; setGPSBar('err',err.code===1?'📡 GPS blocked':'📡 GPS unavailable — tap to retry'); },
       {enableHighAccuracy:true,maximumAge:5000,timeout:20000}
     );
   }
@@ -514,118 +641,85 @@
   window.signIn=function(){if(tokenClient)tokenClient.requestAccessToken({prompt:''});else showToast('Loading...');};
   window.signOut=function(){
     if(accessToken){google.accounts.oauth2.revoke(accessToken,function(){});accessToken=null;}
+    if(bleDevice&&bleDevice.gatt.connected) bleDevice.gatt.disconnect();
     uniqueTags={};lastScanTime={};bbScans=[];
     showScreen('loginScreen');
   };
-
   function onSignedIn() {
     loadLocal();
-    if (sheetId && operationName) {
-      // Returning user — go straight to app
-      launchApp();
-    } else {
-      // New user — show onboarding
-      showScreen('onboardScreen');
-      document.getElementById('operationInput').focus();
-    }
+    if (sheetId&&operationName) launchApp();
+    else showScreen('onboardScreen');
   }
-
   function launchApp() {
-    document.getElementById('operationName').textContent = operationName;
+    document.getElementById('operationName').textContent=operationName;
     showScreen('appScreen');
     startGPS();
-    setSheetsBar('ok', '✅ Connected — ' + operationName);
+    setSheetsBar('ok','✅ Connected — '+operationName);
   }
 
-  // ── AUTO CREATE GOOGLE SHEET ──
+  // CREATE WORKSPACE
   window.createWorkspace = function() {
-    var opName = document.getElementById('operationInput').value.trim();
-    if (!opName) { showToast('Enter your operation name', true); return; }
-    operationName = opName;
-
-    var btn = document.getElementById('onboardBtn');
-    btn.disabled = true;
-    btn.textContent = 'Setting up...';
-    document.getElementById('onboardProgress').style.display = 'block';
-
-    var sheetTitle = 'HerdMate — ' + opName + ' ' + YEAR;
-
-    // Step 1: Create the spreadsheet
-    setStep('stepCreate', 'active', '⏳ Creating your Google Sheet...');
-    fetch('https://sheets.googleapis.com/v4/spreadsheets', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        properties: { title: sheetTitle },
-        sheets: [
-          { properties: { title: 'Head Count', index: 0 } },
-          { properties: { title: 'Bovine Beacon Log', index: 1 } },
-          { properties: { title: 'Animals', index: 2 } }
+    var opName=document.getElementById('operationInput').value.trim();
+    if(!opName){showToast('Enter your operation name',true);return;}
+    operationName=opName;
+    var btn=document.getElementById('onboardBtn');
+    btn.disabled=true; btn.textContent='Setting up...';
+    document.getElementById('onboardProgress').style.display='block';
+    var sheetTitle='HerdMate — '+opName+' '+YEAR;
+    setStep('stepCreate','active','⏳ Creating your Google Sheet...');
+    fetch('https://sheets.googleapis.com/v4/spreadsheets',{
+      method:'POST',
+      headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+      body:JSON.stringify({
+        properties:{title:sheetTitle},
+        sheets:[
+          {properties:{title:'Head Count',index:0}},
+          {properties:{title:'Bovine Beacon Log',index:1}},
+          {properties:{title:'Animals',index:2}}
         ]
       })
     })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (!data.spreadsheetId) throw new Error('Sheet creation failed');
-      sheetId = data.spreadsheetId;
-      setStep('stepCreate', 'done', '✅ Google Sheet created');
-      setStep('stepTab', 'done', '✅ Tabs created (Head Count, Beacon Log, Animals)');
-
-      // Step 2: Write headers to Head Count tab
-      setStep('stepHeaders', 'active', '⏳ Writing column headers...');
-      var hcHeaders = [['Session','Date','Tag EPC','Pasture','First Seen','Latitude','Longitude','GPS Accuracy (m)','Read Count','Mode','Operation','Logged By']];
-      var bbHeaders = [['Date','Time','Tag EPC','Target Tag','Pasture','Found','Latitude','Longitude','Operation']];
-      var animHeaders = [['Tag EPC','Animal ID','Sex','Breed','DOB','Dam Tag','Sire Tag','Notes']];
-
-      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values:batchUpdate', {
-        method: 'POST',
-        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          valueInputOption: 'RAW',
-          data: [
-            { range: 'Head Count!A1:L1', values: hcHeaders },
-            { range: 'Bovine Beacon Log!A1:I1', values: bbHeaders },
-            { range: 'Animals!A1:H1', values: animHeaders }
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(!data.spreadsheetId) throw new Error('Sheet creation failed');
+      sheetId=data.spreadsheetId;
+      setStep('stepCreate','done','✅ Google Sheet created');
+      setStep('stepTab','done','✅ Tabs created');
+      setStep('stepHeaders','active','⏳ Writing column headers...');
+      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values:batchUpdate',{
+        method:'POST',
+        headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+        body:JSON.stringify({
+          valueInputOption:'RAW',
+          data:[
+            {range:'Head Count!A1:L1',values:[['Session','Date','Tag EPC','Pasture','First Seen','Latitude','Longitude','GPS Accuracy (m)','Read Count','Mode','Operation','Logged By']]},
+            {range:'Bovine Beacon Log!A1:I1',values:[['Date','Time','Tag EPC','Target Tag','Pasture','Found','Latitude','Longitude','Operation']]},
+            {range:'Animals!A1:H1',values:[['Tag EPC','Animal ID','Sex','Breed','DOB','Dam Tag','Sire Tag','Notes']]}
           ]
         })
       });
     })
-    .then(function(r) {
-      if (!r.ok) throw new Error('Header write failed');
-      setStep('stepHeaders', 'done', '✅ Headers written to all tabs');
-      setStep('stepDone', 'active', '⏳ Finalizing...');
-
-      // Save locally so returning users skip onboarding
-      saveLocal(sheetId, operationName);
-
-      setTimeout(function() {
-        setStep('stepDone', 'done', '✅ HerdMate workspace ready!');
-        setTimeout(function() { launchApp(); }, 800);
-      }, 500);
+    .then(function(r){
+      if(!r.ok) throw new Error('Header write failed');
+      setStep('stepHeaders','done','✅ Headers written');
+      setStep('stepDone','active','⏳ Finalizing...');
+      saveLocal(sheetId,operationName);
+      setTimeout(function(){setStep('stepDone','done','✅ HerdMate workspace ready!');setTimeout(function(){launchApp();},800);},500);
     })
-    .catch(function(err) {
-      btn.disabled = false;
-      btn.textContent = 'Set Up My HerdMate →';
-      showToast('Setup failed — check connection', true);
-      console.error(err);
+    .catch(function(err){
+      btn.disabled=false; btn.textContent='Set Up My HerdMate →';
+      showToast('Setup failed — check connection',true);
     });
   };
+  function setStep(id,state,text){var el=document.getElementById(id);if(!el)return;el.textContent=text;el.className='step '+state;}
 
-  function setStep(id, state, text) {
-    var el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = text;
-    el.className = 'step ' + state;
-  }
-
-  // SHEETS STATUS
+  // SHEETS
   function setSheetsBar(state,msg){var el=document.getElementById('sheetsBar');if(!el)return;el.textContent=msg;el.className='status-bar sheets-'+state;}
-
   function writeToSheet(record, mode) {
-    if (!accessToken||!sheetId) { record.synced=false; renderTable(); return; }
-    var tab = mode==='Bovine Beacon' ? 'Bovine Beacon Log' : 'Head Count';
+    if(!accessToken||!sheetId){record.synced=false;renderTable();return;}
+    var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
     var row;
-    if (mode==='Bovine Beacon') {
+    if(mode==='Bovine Beacon'){
       row=[[record.date,record.time,record.tag,bbTarget,record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
     } else {
       row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,record.firstGPS?record.firstGPS.lat:'',record.firstGPS?record.firstGPS.lng:'',record.firstGPS?record.firstGPS.acc:'',record.readCount,'Head Count',operationName,'HerdMate Scanner']];
@@ -633,20 +727,16 @@
     fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     }).then(function(r){
-      if (record.synced !== undefined) { record.synced=r.ok; renderTable(); }
-      setSheetsBar(r.ok?'ok':'err', r.ok?'✅ Synced — '+operationName:'❌ Sync failed');
+      if(record.synced!==undefined){record.synced=r.ok;renderTable();}
+      setSheetsBar(r.ok?'ok':'err',r.ok?'✅ Synced — '+operationName:'❌ Sync failed');
     }).catch(function(){
-      if (record.synced !== undefined) { record.synced=false; renderTable(); }
+      if(record.synced!==undefined){record.synced=false;renderTable();}
       setSheetsBar('err','❌ Offline — saved locally');
     });
   }
 
   // DAY/NIGHT
-  window.toggleMode=function(){
-    dayMode=!dayMode;
-    document.getElementById('app').className=dayMode?'day':'';
-    document.getElementById('modeBtn').textContent=dayMode?'🌙':'☀️';
-  };
+  window.toggleMode=function(){dayMode=!dayMode;document.getElementById('app').className=dayMode?'day':'';document.getElementById('modeBtn').textContent=dayMode?'🌙':'☀️';};
 
   // HEAD COUNT
   document.getElementById('pastureInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();setPasture();}});
@@ -680,8 +770,11 @@
     var raw=document.getElementById('tagInput').value.trim().toUpperCase();
     if(!raw||!currentPasture)return;
     document.getElementById('tagInput').value='';
-    if(!isValidCattleTag(raw)){document.getElementById('tagInput').focus();return;}
-    if(isDebounceDuplicate(raw)){document.getElementById('tagInput').focus();return;}
+    processIncomingTag(raw);
+    document.getElementById('tagInput').focus();
+  };
+
+  function processHCTag(raw) {
     playScanTick();
     var now=new Date();
     var timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -702,8 +795,7 @@
       showToast('NEW: '+raw);
       writeToSheet(record,'Head Count');
     }
-    document.getElementById('tagInput').focus();
-  };
+  }
 
   function updateHeadcountBanner(){
     var keys=Object.keys(uniqueTags).filter(function(k){return uniqueTags[k].pasture===currentPasture;});
@@ -718,7 +810,7 @@
         badge.style.display='inline-block';
         playHeadCountComplete(count);
       }
-    } else { banner.className='headcount-banner'; badge.style.display='none'; }
+    } else {banner.className='headcount-banner';badge.style.display='none';}
   }
 
   // BOVINE BEACON
@@ -742,14 +834,13 @@
     document.getElementById('bbStatus').className='bb-status searching';
     document.getElementById('bbStatus').innerHTML='<div class="bb-status-icon">🔍</div><div class="bb-status-text">Scanning... searching for tag</div><div class="bb-target-display">Target: '+esc(t)+'</div>';
     renderBBTable();
-    setTimeout(function(){document.getElementById('bbScanInput').focus();},100);
     showToast('Bovine Beacon active','blue');
   };
 
   function processBBScan(raw){
     if(!bbActive||!raw)return;
-    if(!isValidCattleTag(raw)){document.getElementById('bbScanInput').focus();return;}
-    if(isDebounceDuplicate('bb_'+raw)){document.getElementById('bbScanInput').focus();return;}
+    if(!isValidCattleTag(raw))return;
+    if(isDebounceDuplicate('bb_'+raw))return;
     var now=new Date();
     var timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     var dateStr=now.toLocaleDateString();
@@ -770,9 +861,8 @@
       document.getElementById('bbFound').style.color='var(--green)';
       playFoundAlert(raw);
       showToast('🎯 FOUND: '+raw,'good');
-    } else if(!isTarget){ playScanTick(); }
+    } else if(!isTarget){playScanTick();}
     renderBBTable();
-    document.getElementById('bbScanInput').focus();
   }
 
   function renderBBTable(){
@@ -785,7 +875,6 @@
   }
 
   window.setFilter=function(name){filterPasture=name;renderTable();renderTabs();};
-
   function renderTabs(){
     var pastures=[];
     Object.keys(uniqueTags).forEach(function(k){var p=uniqueTags[k].pasture;if(pastures.indexOf(p)===-1)pastures.push(p);});
@@ -819,7 +908,7 @@
   }
 
   function updateStats(){
-    var total=0; Object.keys(uniqueTags).forEach(function(k){total+=uniqueTags[k].readCount;});
+    var total=0;Object.keys(uniqueTags).forEach(function(k){total+=uniqueTags[k].readCount;});
     document.getElementById('nTotal').textContent=total;
     document.getElementById('nUnique').textContent=Object.keys(uniqueTags).length;
     var p={};Object.keys(uniqueTags).forEach(function(k){p[uniqueTags[k].pasture]=1;});
@@ -828,7 +917,7 @@
 
   window.clearAll=function(){
     if(!Object.keys(uniqueTags).length&&!bbScans.length)return;
-    if(!confirm('Clear scan data from this view?\n\nData already synced to Google Sheets is kept there.'))return;
+    if(!confirm('Clear scan data?\n\nData already synced to Google Sheets is kept there.'))return;
     uniqueTags={};lastScanTime={};bbScans=[];filterPasture='all';bbFound=false;bbActive=false;bbTarget='';
     document.getElementById('headcountBanner').style.display='none';
     document.getElementById('bbStatus').className='bb-status';
@@ -838,11 +927,7 @@
 
   // EXPORTS
   var HEADERS=['#','Tag EPC','Pasture','Date','First Seen','Latitude','Longitude','GPS Acc(m)','Read Count'];
-  function getRows(keys){
-    var rows=[HEADERS];
-    keys.forEach(function(k,i){var r=uniqueTags[k];rows.push([i+1,r.tag,r.pasture,r.firstDate,r.firstTime,r.firstGPS?r.firstGPS.lat:'',r.firstGPS?r.firstGPS.lng:'',r.firstGPS?r.firstGPS.acc:'',r.readCount]);});
-    return rows;
-  }
+  function getRows(keys){var rows=[HEADERS];keys.forEach(function(k,i){var r=uniqueTags[k];rows.push([i+1,r.tag,r.pasture,r.firstDate,r.firstTime,r.firstGPS?r.firstGPS.lat:'',r.firstGPS?r.firstGPS.lng:'',r.firstGPS?r.firstGPS.acc:'',r.readCount]);});return rows;}
   window.exportCSV=function(){if(!Object.keys(uniqueTags).length){showToast('No data');return;}var rows=getRows(Object.keys(uniqueTags));dl('herdmate-headcount.csv','text/csv',rows.map(function(r){return r.map(function(c){return '"'+String(c).replace(/"/g,'""')+'"';}).join(',');}).join('\n'));showToast('CSV exported!');};
   window.exportByPasture=function(){
     if(!Object.keys(uniqueTags).length){showToast('No data');return;}
@@ -863,9 +948,19 @@
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
-  // GOOGLE AUTH INIT
-  window.addEventListener('load',function(){
-    // Keyboard enter on onboard input
+  // INIT
+  window.addEventListener('load', function() {
+    // Check browser
+    if (isBrave && isBrave()) {
+      showScreen('chromeScreen');
+      return;
+    }
+    if (!isChrome()) {
+      showScreen('chromeScreen');
+      return;
+    }
+
+    // Keyboard enter on onboard
     var oi=document.getElementById('operationInput');
     if(oi) oi.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();createWorkspace();}});
 
@@ -881,6 +976,8 @@
             onSignedIn();
           }
         });
+        // Show login
+        showScreen('loginScreen');
       }
     },200);
   });
@@ -891,3 +988,4 @@
 </script>
 </body>
 </html>
+
