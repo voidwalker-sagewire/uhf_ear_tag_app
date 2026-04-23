@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<title>HerdMate Calf Scale</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
+
+  :root {
+    --bg:#0a0a0a; --panel:#141414; --panel2:#1c1c1c; --border:#2a2a2a;
+    --orange:#e86a1a; --text:#f0f0f0; --muted:#888; 
+    --green:#4caf50; --blue:#4a9eff; --red:#e04040;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; }
+
+  header { background:var(--bg); border-bottom:3px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; }
+  .brand-text { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; letter-spacing:1px; color:var(--orange); line-height:1; }
+  .brand-sub { font-size:0.6rem; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
+  
+  .status-bar { padding:7px 14px; display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; font-weight:600; }
+  .sheets-ok { background:#0a1a0a; border-bottom:1px solid var(--green); color:var(--green); }
+  .sheets-err { background:#2a0a0a; border-bottom:1px solid var(--red); color:var(--red); }
+  .ble-btn { background:var(--blue); color:#fff; border:none; padding:6px 12px; border-radius:6px; font-family:'Oswald',sans-serif; font-weight:700; cursor:pointer; }
+  
+  .main-content { padding: 20px; display:flex; flex-direction:column; flex:1; gap: 20px; }
+  
+  /* WEIGHT DISPLAY */
+  .weight-display { background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:30px 10px; text-align:center; transition: 0.3s; }
+  .weight-display.connected { border-color:var(--blue); background:#0a1a2a; border-style:solid; }
+  .weight-num { font-family:'Oswald',sans-serif; font-size:5rem; font-weight:700; color:var(--orange); line-height:1; }
+  .weight-unit { font-size:1.2rem; color:var(--muted); font-weight:600; }
+  
+  /* INPUTS */
+  .input-group { display:flex; flex-direction:column; gap:6px; }
+  .input-label { font-family:'Oswald',sans-serif; font-size:0.85rem; text-transform:uppercase; color:var(--muted); letter-spacing:1px; }
+  .tag-input { background:var(--bg); border:2px solid var(--border); border-radius:8px; color:var(--text); font-family:monospace; font-size:1.2rem; padding:14px; outline:none; transition:border-color .15s; }
+  .tag-input:focus { border-color:var(--orange); }
+  
+  .save-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1.2rem; letter-spacing:1px; padding:16px; cursor:pointer; margin-top:10px; }
+  .save-btn:disabled { opacity:0.4; cursor:not-allowed; }
+
+  /* DEBUGGER */
+  .debugger { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px; margin-top:auto; font-family:monospace; font-size:0.7rem; color:var(--muted); height:80px; overflow-y:auto; word-break:break-all; }
+  
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#000; border:2px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-weight:600; z-index:999; display:none; }
+</style>
+</head>
+<body>
+
+  <header>
+    <div>
+      <div class="brand-text">HerdMate</div>
+      <div class="brand-sub">Calf Scale</div>
+    </div>
+    <div style="margin-left:auto;">
+      <button id="authBtn" style="background:#fff; border:none; padding:6px 12px; border-radius:6px; font-weight:bold; cursor:pointer;">Sign in to Google</button>
+    </div>
+  </header>
+
+  <div class="status-bar sheets-err" id="sheetsBar">
+    <span id="sheetsStatus">Google Sheets Not Connected</span>
+    <button class="ble-btn" id="bleBtn" onclick="connectScale()">Connect Scale</button>
+  </div>
+
+  <div class="main-content">
+    
+    <div class="weight-display" id="weightDisplay">
+      <div class="weight-num" id="liveWeight">0.00</div>
+      <div class="weight-unit">LBS</div>
+    </div>
+
+    <div class="input-group">
+      <span class="input-label">Calf Tag EPC</span>
+      <input type="text" id="tagInput" class="tag-input" placeholder="Scan or type tag..." autocomplete="off" autocapitalize="characters" />
+    </div>
+
+    <button class="save-btn" id="saveBtn" onclick="saveToSheet()">SAVE TO HERDMATE</button>
+
+    <div class="input-group">
+      <span class="input-label">Raw Bluetooth Data (Debug)</span>
+      <div class="debugger" id="debugConsole">Waiting for scale broadcast...</div>
+    </div>
+
+  </div>
+
+  <div class="toast" id="toast">Saved to Sheets!</div>
+
+<script>
+  // Google API Settings
+  const CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
+  const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
+  let accessToken = null;
+  let tokenClient = null;
+  let sheetId = localStorage.getItem('hm_sheet_id') || ''; 
+  
+  // Scale Settings
+  let currentWeight = 0.00;
+  let scaleDevice = null;
+
+  // --- GOOGLE AUTH ---
+  window.onload = function() {
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (response) => {
+        if (response.error) return;
+        accessToken = response.access_token;
+        document.getElementById('authBtn').style.display = 'none';
+        
+        if (sheetId) {
+          document.getElementById('sheetsBar').className = 'status-bar sheets-ok';
+          document.getElementById('sheetsStatus').innerText = 'Ready to save data';
+        } else {
+          document.getElementById('sheetsStatus').innerText = 'Error: Run Scanner App setup first to create Sheet';
+        }
+      }
+    });
+
+    document.getElementById('authBtn').onclick = () => { tokenClient.requestAccessToken({prompt: ''}); };
+  };
+
+  // --- BLUETOOTH ADVERTISEMENT LISTENER ---
+  async function connectScale() {
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth requires Chrome browser.");
+      return;
+    }
+    
+    try {
+      document.getElementById('bleBtn').innerText = "Scanning...";
+      
+      // Request device with watchAdvertisements capability
+      scaleDevice = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true
+      });
+
+      // Listen for the broadcast packets
+      scaleDevice.addEventListener('advertisementreceived', handleBroadcast);
+      await scaleDevice.watchAdvertisements();
+
+      document.getElementById('bleBtn').innerText = "Scale Linked";
+      document.getElementById('bleBtn').style.background = "var(--green)";
+      document.getElementById('weightDisplay').className = "weight-display connected";
+
+    } catch (error) {
+      document.getElementById('bleBtn').innerText = "Connect Scale";
+      console.log("Bluetooth Error: " + error);
+    }
+  }
+
+  function handleBroadcast(event) {
+    // Look at the Manufacturer Data in the broadcast packet
+    event.manufacturerData.forEach((valueDataView, key) => {
+      // Convert the raw bytes into a readable Hex string
+      let hexString = Array.from(new Uint8Array(valueDataView.buffer))
+                           .map(b => b.toString(16).padStart(2, '0')).join('');
+      
+      document.getElementById('debugConsole').innerText = "Payload: " + hexString;
+
+      // --- THE WEIGHT PARSER ---
+      // Most WH-C06 scales put the weight in bytes 4 and 5 (index 8-11 in hex string)
+      // Example: If hex is 000000000B54... 0B54 in hex = 2900 decimal. 2900 / 100 = 29.00 lbs
+      try {
+        if (hexString.length >= 12) {
+            let weightHex = hexString.substring(8, 12);
+            let rawDecimal = parseInt(weightHex, 16);
+            
+            // Prevent crazy spikes from bad packets
+            if (rawDecimal < 10000) {
+                currentWeight = (rawDecimal / 100).toFixed(2);
+                document.getElementById('liveWeight').innerText = currentWeight;
+            }
+        }
+      } catch (e) { }
+    });
+  }
+
+  // --- SAVE TO GOOGLE SHEETS ---
+  function saveToSheet() {
+    let tag = document.getElementById('tagInput').value.trim();
+    if (!tag) { alert("Please enter or scan a Calf Tag"); return; }
+    if (!accessToken || !sheetId) { alert("Please Sign In to Google first."); return; }
+
+    let btn = document.getElementById('saveBtn');
+    btn.innerText = "SAVING...";
+    btn.disabled = true;
+
+    let now = new Date();
+    let dateStr = now.toLocaleDateString();
+    let timeStr = now.toLocaleTimeString();
+
+    // Appending to the "Animals" tab. Columns: Tag EPC, Animal ID, Sex, Breed, DOB, Dam Tag, Sire Tag, Notes, Weight
+    // Note: I am placing the Weight in column I (index 8). 
+    let row = [[tag, "", "", "", dateStr, "", "", "Birth Weight: " + currentWeight + " lbs", currentWeight]];
+
+    fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Animals!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + accessToken,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ values: row })
+    }).then(res => {
+      if (res.ok) {
+        document.getElementById('toast').style.display = 'block';
+        setTimeout(() => { document.getElementById('toast').style.display = 'none'; }, 3000);
+        document.getElementById('tagInput').value = '';
+      } else {
+        alert("Failed to save to sheet.");
+      }
+      btn.innerText = "SAVE TO HERDMATE";
+      btn.disabled = false;
+    }).catch(err => {
+      alert("Network error.");
+      btn.innerText = "SAVE TO HERDMATE";
+      btn.disabled = false;
+    });
+  }
+</script>
+</body>
+</html>
