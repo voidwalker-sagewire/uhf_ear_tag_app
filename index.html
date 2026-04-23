@@ -488,7 +488,16 @@
     if(mode==='Bovine Beacon'){
       row=[[record.date,record.time,record.tag,record.targetTag||'',record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
     } else {
-      row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,record.firstGPS?record.firstGPS.lat:'',record.firstGPS?record.firstGPS.lng:'',record.firstGPS?record.firstGPS.acc:'',record.readCount,'Head Count',operationName,'HerdMate Scanner']];
+      row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,
+        record.firstGPS?record.firstGPS.lat:'',
+        record.firstGPS?record.firstGPS.lng:'',
+        record.firstGPS?record.firstGPS.acc:'',
+        record.firstGPS&&record.firstGPS.alt!==null?record.firstGPS.alt:'',
+        record.readCount,'Head Count',operationName,
+        record.weather?record.weather.temp:'',
+        record.weather?record.weather.condition:'',
+        record.weather?record.weather.wind:'',
+        record.weather?record.weather.humidity:'']];
     }
     fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
@@ -643,11 +652,21 @@
     var decoder = new TextDecoder('utf-8');
     var chunk = decoder.decode(value);
     bleBuffer += chunk;
-    // R6 sends EPC followed by newline or carriage return
     var lines = bleBuffer.split(/[\r\n]+/);
-    bleBuffer = lines.pop(); // keep incomplete line
+    bleBuffer = lines.pop();
     lines.forEach(function(line) {
-      var epc = line.trim().toUpperCase();
+      line = line.trim();
+      // Check if line contains RSSI data (format varies by firmware)
+      // Some R6 firmware sends: EPC,RSSI or EPC|-70 or just EPC
+      var rssiMatch = line.match(/,(-\d+)$/) || line.match(/\|(-\d+)$/);
+      if (rssiMatch) {
+        var rssi = parseInt(rssiMatch[1]);
+        if (currentMode === 'bb' && bbActive && !bbFound) {
+          updateRSSIFromBLE(rssi);
+        }
+        line = line.replace(rssiMatch[0], '');
+      }
+      var epc = line.toUpperCase();
       if (epc) processIncomingTag(epc);
     });
   }
@@ -713,7 +732,16 @@
     setGPSBar('searching','📡 Acquiring GPS...');
     if (gpsWatcher!==null) navigator.geolocation.clearWatch(gpsWatcher);
     gpsWatcher=navigator.geolocation.watchPosition(
-      function(pos){ lastGPS={lat:pos.coords.latitude.toFixed(6),lng:pos.coords.longitude.toFixed(6),acc:Math.round(pos.coords.accuracy)}; setGPSBar('ok','📡 GPS +/-'+lastGPS.acc+'m — '+lastGPS.lat+', '+lastGPS.lng); },
+      function(pos){
+        lastGPS={
+          lat:pos.coords.latitude.toFixed(6),
+          lng:pos.coords.longitude.toFixed(6),
+          acc:Math.round(pos.coords.accuracy),
+          alt:pos.coords.altitude ? Math.round(pos.coords.altitude) : null,
+          altAcc:pos.coords.altitudeAccuracy ? Math.round(pos.coords.altitudeAccuracy) : null
+        };
+        setGPSBar('ok','📡 GPS +/-'+lastGPS.acc+'m — '+lastGPS.lat+', '+lastGPS.lng+(lastGPS.alt!==null?' | '+lastGPS.alt+'m elev':''));
+      },
       function(err){ lastGPS=null; setGPSBar('err',err.code===1?'📡 GPS blocked':'📡 GPS unavailable — tap to retry'); },
       {enableHighAccuracy:true,maximumAge:5000,timeout:20000}
     );
@@ -779,7 +807,7 @@
         body:JSON.stringify({
           valueInputOption:'RAW',
           data:[
-            {range:'Head Count!A1:L1',values:[['Session','Date','Tag EPC','Pasture','First Seen','Latitude','Longitude','GPS Accuracy (m)','Read Count','Mode','Operation','Logged By']]},
+            {range:'Head Count!A1:P1',values:[['Session','Date','Tag EPC','Pasture','First Seen','Latitude','Longitude','GPS Accuracy (m)','Elevation (m)','Read Count','Mode','Operation','Temperature','Conditions','Wind','Humidity']]},
             {range:'Bovine Beacon Log!A1:I1',values:[['Date','Time','Tag EPC','Target Tag','Pasture','Found','Latitude','Longitude','Operation']]},
             {range:'Animals!A1:H1',values:[['Tag EPC','Animal ID','Sex','Breed','DOB','Dam Tag','Sire Tag','Notes']]}
           ]
@@ -809,7 +837,16 @@
     if(mode==='Bovine Beacon'){
       row=[[record.date,record.time,record.tag,bbTarget,record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
     } else {
-      row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,record.firstGPS?record.firstGPS.lat:'',record.firstGPS?record.firstGPS.lng:'',record.firstGPS?record.firstGPS.acc:'',record.readCount,'Head Count',operationName,'HerdMate Scanner']];
+      row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,
+        record.firstGPS?record.firstGPS.lat:'',
+        record.firstGPS?record.firstGPS.lng:'',
+        record.firstGPS?record.firstGPS.acc:'',
+        record.firstGPS&&record.firstGPS.alt!==null?record.firstGPS.alt:'',
+        record.readCount,'Head Count',operationName,
+        record.weather?record.weather.temp:'',
+        record.weather?record.weather.condition:'',
+        record.weather?record.weather.wind:'',
+        record.weather?record.weather.humidity:'']];
     }
     fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
@@ -873,21 +910,30 @@
     var now=new Date();
     var timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     var dateStr=now.toLocaleDateString();
-    var gps=lastGPS?{lat:lastGPS.lat,lng:lastGPS.lng,acc:lastGPS.acc}:null;
+    var gps=lastGPS?{lat:lastGPS.lat,lng:lastGPS.lng,acc:lastGPS.acc,alt:lastGPS.alt,altAcc:lastGPS.altAcc}:null;
     var key=raw+'__'+currentPasture;
     if(uniqueTags[key]){
       uniqueTags[key].readCount++;
       uniqueTags[key].lastTime=timeStr;
       renderTable();updateStats();updateHeadcountBanner();
     } else {
-      var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null};
+      var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null,weather:null};
       uniqueTags[key]=record;
       var zone=document.getElementById('scanZone');
       zone.className='scan-zone lit';
       setTimeout(function(){zone.className='scan-zone';},350);
       renderTable();renderTabs();updateStats();updateHeadcountBanner();
       showToast('NEW: '+raw);
-      writeToSheet(record,'Head Count');
+      // Fetch weather then write to sheet
+      if (gps) {
+        fetchWeather(gps.lat, gps.lng, function(weather) {
+          record.weather = weather;
+          renderTable();
+          writeToSheet(record,'Head Count');
+        });
+      } else {
+        writeToSheet(record,'Head Count');
+      }
     }
   }
 
@@ -929,6 +975,7 @@
     document.getElementById('bbStatus').innerHTML='<div class="bb-status-icon">🔍</div><div class="bb-status-text">Scanning... searching for tag</div><div class="bb-target-display">Target: '+esc(t)+'</div>';
     renderBBTable();
     showToast('Bovine Beacon active','blue');
+    if (vibOn) startJawsHaptics();
   };
 
   function processBBScan(raw){
@@ -946,6 +993,7 @@
     writeToSheet(scanRecord,'Bovine Beacon');
     if(isTarget&&!bbFound){
       bbFound=true;
+      stopJawsHaptics();
       document.getElementById('bbStatus').className='bb-status found';
       document.getElementById('bbStatus').innerHTML='<div class="bb-status-icon">✅</div><div class="bb-status-text">ANIMAL LOCATED!</div><div class="bb-target-display">'+esc(raw)+(gps?'<br>📍 '+gps.lat+', '+gps.lng:'')+'</div>';
       document.getElementById('bbDot').className='dot blink';
@@ -994,7 +1042,12 @@
     var rows='';
     filtered.forEach(function(k,i){
       var r=uniqueTags[k];
-      var gpsHtml=r.firstGPS?'<span class="gps-line ok">📍 '+r.firstGPS.lat+', '+r.firstGPS.lng+' (±'+r.firstGPS.acc+'m)</span>':'<span class="gps-line">No GPS</span>';
+      var gpsHtml=r.firstGPS
+        ?'<span class="gps-line ok">📍 '+r.firstGPS.lat+', '+r.firstGPS.lng+' (±'+r.firstGPS.acc+'m)'+(r.firstGPS.alt!==null?' | '+r.firstGPS.alt+'m':'')+'</span>'
+        :'<span class="gps-line">No GPS</span>';
+      var weatherHtml=r.weather
+        ?'<span class="gps-line ok">🌤 '+r.weather.temp+' · '+r.weather.condition+'</span>'
+        :(r.firstGPS?'<span class="gps-line" style="color:#555">⏳ fetching weather...</span>':'');
       var syncHtml=r.synced===null?'<span style="color:var(--orange);font-size:.8rem">⏳</span>':r.synced?'<span style="color:var(--green);font-size:.8rem">✅</span>':'<span style="color:var(--red);font-size:.75rem">⚠️</span>';
       rows+='<tr class="'+(i===0?'flash':'')+'"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
     });
@@ -1014,6 +1067,7 @@
     if(!confirm('Clear scan data?\n\nData already synced to Google Sheets is kept there.'))return;
     uniqueTags={};lastScanTime={};bbScans=[];filterPasture='all';bbFound=false;bbActive=false;bbTarget='';
     document.getElementById('headcountBanner').style.display='none';
+    stopJawsHaptics();
     document.getElementById('bbStatus').className='bb-status';
     document.getElementById('bbStatus').innerHTML='<div class="bb-status-icon">📡</div><div class="bb-status-text">Set a target tag to begin hunting</div>';
     renderTable();renderTabs();updateStats();renderBBTable();
@@ -1041,6 +1095,89 @@
     t._timer=setTimeout(function(){t.className='toast'+(type==='blue'?' blue':type==='good'?' good':type===true||type==='warn'?' warn':'');},2500);
   }
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  // ── WEATHER ──
+  var lastWeather = null;
+  var lastWeatherFetch = 0;
+  var lastWeatherCoords = null;
+  var WEATHER_CACHE_MS = 5 * 60 * 1000; // cache 5 minutes
+
+  function fetchWeather(lat, lng, callback) {
+    var now = Date.now();
+    // Use cached weather if recent and same area
+    if (lastWeather && (now - lastWeatherFetch) < WEATHER_CACHE_MS) {
+      callback(lastWeather);
+      return;
+    }
+    // National Weather Service — free, no API key
+    // Step 1: get grid point
+    fetch('https://api.weather.gov/points/' + lat + ',' + lng, {
+      headers: { 'User-Agent': 'HerdMate/1.0 (herdmate.ag)' }
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var forecastUrl = data.properties && data.properties.forecastHourly;
+      if (!forecastUrl) throw new Error('No forecast URL');
+      return fetch(forecastUrl, { headers: { 'User-Agent': 'HerdMate/1.0 (herdmate.ag)' } });
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var period = data.properties && data.properties.periods && data.properties.periods[0];
+      if (!period) throw new Error('No period data');
+      var weather = {
+        temp: period.temperature + '°' + period.temperatureUnit,
+        condition: period.shortForecast,
+        wind: period.windSpeed + ' ' + period.windDirection,
+        humidity: period.relativeHumidity ? period.relativeHumidity.value + '%' : '',
+        raw: period.shortForecast
+      };
+      lastWeather = weather;
+      lastWeatherFetch = Date.now();
+      callback(weather);
+    })
+    .catch(function() {
+      // Silently fail — weather is bonus data
+      callback(null);
+    });
+  }
+
+  // ── JAWS HAPTICS ──
+  var jawsInterval = null;
+  var jawsRSSI = -80; // default weak signal
+
+  function startJawsHaptics() {
+    stopJawsHaptics();
+    updateJawsHaptics();
+  }
+
+  function stopJawsHaptics() {
+    if (jawsInterval) { clearInterval(jawsInterval); jawsInterval = null; }
+    if (navigator.vibrate) navigator.vibrate(0);
+  }
+
+  function updateJawsHaptics() {
+    // RSSI typically -30 (very close) to -90 (very far)
+    // Map to pulse speed: close = fast, far = slow
+    var rssi = jawsRSSI;
+    var normalized = Math.max(0, Math.min(1, (rssi + 90) / 60)); // 0=far, 1=close
+    var pauseMs = Math.round(1500 - (normalized * 1200)); // 1500ms far, 300ms close
+    var pulseMs = Math.round(150 + (normalized * 100)); // shorter pulse when close
+
+    if (navigator.vibrate) {
+      // Dun-Dun pattern
+      navigator.vibrate([pulseMs, 80, pulseMs]);
+    }
+
+    jawsInterval = setTimeout(function() {
+      if (bbActive && !bbFound) {
+        updateJawsHaptics();
+      }
+    }, pauseMs + pulseMs * 2 + 80);
+  }
+
+  function updateRSSIFromBLE(rssiValue) {
+    jawsRSSI = rssiValue || -80;
+  }
 
   // ── ROTATION LOCK ──
   var rotationLocked = false;
