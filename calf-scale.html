@@ -123,6 +123,24 @@
     document.getElementById('authBtn').onclick = () => { tokenClient.requestAccessToken({prompt: ''}); };
   };
 
+  function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  // Apply colors based on type
+  if (type === 'blue') t.style.borderColor = 'var(--blue)';
+  else if (type === 'good') t.style.borderColor = 'var(--green)';
+  else if (type === 'warn') t.style.borderColor = 'var(--red)';
+  
+  t.style.display = 'block';
+  
+  // Hide it after 3 seconds
+  setTimeout(() => {
+    t.style.display = 'none';
+    t.style.borderColor = 'var(--green)'; // Reset to default
+  }, 3000);
+}
+
+
   // --- BLUETOOTH ADVERTISEMENT LISTENER ---
   async function connectScale() {
   if (!navigator.bluetooth) {
@@ -163,7 +181,7 @@
   function handleBroadcast(event) {
     let hexString = "";
 
-    // Catch data from Manufacturer or Service fields
+    // Step 1: Collect the data from the scale's broadcast
     event.manufacturerData.forEach((valueDataView) => {
         hexString += Array.from(new Uint8Array(valueDataView.buffer))
                           .map(b => b.toString(16).padStart(2, '0')).join('');
@@ -176,28 +194,31 @@
         });
     }
 
+    // Step 2: Show the raw data in your log at the bottom
     if (hexString) {
         document.getElementById('debugConsole').innerText = "DATA DETECTED: " + hexString;
         
-        // Based on your specific payload: 020311ffffffffffffff004001f4000e42
-        // The weight '01f4' (500) starts at character index 20.
+        // Step 3: THE PARSER
+        // Your payload: 020311ffffffffffffff0040 01f4 000e42
+        // We are grabbing the 4 characters starting at index 20 (01f4)
         try {
             if (hexString.length >= 24) {
                 let weightHex = hexString.substring(20, 24); 
-                let rawDecimal = parseInt(weightHex, 16);
+                let rawDecimal = parseInt(weightHex, 16); // This turns '01f4' into 500
                 
-                // Conversion: If 01f4 (500) was a 5lb weight, we divide by 100
-                // Adjust the '100' below if the number on screen doesn't match your weight
+                // Conversions:
+                // If the scale says 11.0 lbs and the app says 5.00, we change the math below.
+                // For now, let's assume it's transmitting in 1/100ths of a unit.
                 currentWeight = (rawDecimal / 100).toFixed(2);
                 
+                // Step 4: Push the weight to the big orange display
                 document.getElementById('liveWeight').innerText = currentWeight;
             }
         } catch (e) {
-            console.log("Parsing error: " + e);
+            document.getElementById('debugConsole').innerText = "Parsing error: " + e;
         }
     }
 }
-
 
   // --- SAVE TO GOOGLE SHEETS ---
   function saveToSheet() {
