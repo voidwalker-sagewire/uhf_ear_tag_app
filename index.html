@@ -924,15 +924,16 @@
       setTimeout(function(){zone.className='scan-zone';},350);
       renderTable();renderTabs();updateStats();updateHeadcountBanner();
       showToast('NEW: '+raw);
-      // Fetch weather then write to sheet
+      // Write to sheet immediately with whatever we have
+      // Then fetch weather and update the record display
+      writeToSheet(record, 'Head Count');
       if (gps) {
         fetchWeather(gps.lat, gps.lng, function(weather) {
           record.weather = weather;
           renderTable();
-          writeToSheet(record,'Head Count');
+          // Write a second row update with weather data appended
+          updateSheetWeather(record);
         });
-      } else {
-        writeToSheet(record,'Head Count');
       }
     }
   }
@@ -1104,41 +1105,63 @@
 
   function fetchWeather(lat, lng, callback) {
     var now = Date.now();
-    // Use cached weather if recent and same area
+    // Use cached weather if recent (5 min cache)
     if (lastWeather && (now - lastWeatherFetch) < WEATHER_CACHE_MS) {
       callback(lastWeather);
       return;
     }
-    // National Weather Service — free, no API key
-    // Step 1: get grid point
-    fetch('https://api.weather.gov/points/' + lat + ',' + lng, {
-      headers: { 'User-Agent': 'HerdMate/1.0 (herdmate.ag)' }
-    })
+    // OpenWeatherMap — reliable, fast, single call
+    var OWM_KEY = '6a70c4d2186f3c20c348e2e841d10c0c';
+    var url = 'https://api.openweathermap.org/data/2.5/weather' +
+      '?lat=' + lat +
+      '&lon=' + lng +
+      '&appid=' + OWM_KEY +
+      '&units=imperial';
+
+    fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(data) {
-      var forecastUrl = data.properties && data.properties.forecastHourly;
-      if (!forecastUrl) throw new Error('No forecast URL');
-      return fetch(forecastUrl, { headers: { 'User-Agent': 'HerdMate/1.0 (herdmate.ag)' } });
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var period = data.properties && data.properties.periods && data.properties.periods[0];
-      if (!period) throw new Error('No period data');
+      if (!data.main) throw new Error('No weather data');
       var weather = {
-        temp: period.temperature + '°' + period.temperatureUnit,
-        condition: period.shortForecast,
-        wind: period.windSpeed + ' ' + period.windDirection,
-        humidity: period.relativeHumidity ? period.relativeHumidity.value + '%' : '',
-        raw: period.shortForecast
+        temp: Math.round(data.main.temp) + '°F',
+        condition: data.weather && data.weather[0] ? data.weather[0].description : '',
+        wind: Math.round(data.wind.speed) + ' mph ' + degToCompass(data.wind.deg),
+        humidity: data.main.humidity + '%'
       };
       lastWeather = weather;
       lastWeatherFetch = Date.now();
       callback(weather);
     })
     .catch(function() {
-      // Silently fail — weather is bonus data
-      callback(null);
+      // Fallback to Open-Meteo if OWM fails
+      var url2 = 'https://api.open-meteo.com/v1/forecast' +
+        '?latitude=' + lat + '&longitude=' + lng +
+        '&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code' +
+        '&temperature_unit=fahrenheit&wind_speed_unit=mph&timezone=auto&forecast_days=1';
+      fetch(url2)
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        var c = data.current;
+        if (!c) throw new Error('No current data');
+        var codes = {0:'Clear Sky',1:'Mainly Clear',2:'Partly Cloudy',3:'Overcast',51:'Light Drizzle',53:'Drizzle',61:'Light Rain',63:'Rain',65:'Heavy Rain',71:'Light Snow',73:'Snow',80:'Showers',95:'Thunderstorm'};
+        var weather = {
+          temp: Math.round(c.temperature_2m) + '°F',
+          condition: codes[c.weather_code] || 'Variable',
+          wind: Math.round(c.wind_speed_10m) + ' mph',
+          humidity: c.relative_humidity_2m + '%'
+        };
+        lastWeather = weather;
+        lastWeatherFetch = Date.now();
+        callback(weather);
+      })
+      .catch(function() { callback(null); });
     });
+  }
+
+  function degToCompass(deg) {
+    if (deg === undefined) return '';
+    var dirs = ['N','NE','E','SE','S','SW','W','NW'];
+    return dirs[Math.round(deg / 45) % 8];
   }
 
   // ── JAWS HAPTICS ──
