@@ -140,26 +140,20 @@
   };
 
   // --- BLUETOOTH WITH MEMORY ---
+    // --- BLUETOOTH (RELIABLE POPUP METHOD) ---
   async function connectScale() {
     if (!navigator.bluetooth) { alert("Requires Chrome with flags enabled."); return; }
     
     try {
       document.getElementById('bleBtn').innerText = "Scanning...";
       
-      // Step 1: Check if Chrome remembers the scale (skips popup!)
-      let devices = await navigator.bluetooth.getDevices();
-      
-      if (devices && devices.length > 0) {
-          scaleDevice = devices[0];
-          document.getElementById('debugConsole').innerText = "Found scale in memory. Connecting...";
-      } else {
-          // Step 2: Show popup if it's the first time
-          scaleDevice = await navigator.bluetooth.requestDevice({
-            filters: [{ namePrefix: 'IF_' }, { namePrefix: 'WH' }],
-            optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
-            optionalManufacturerData: [0x0000, 0x0100, 0xFF01] 
-          });
-      }
+      // We removed the 'getDevices' memory trick. 
+      // This forces the Chrome popup so we always catch the LIVE broadcast footprint.
+      scaleDevice = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'IF_' }, { namePrefix: 'WH' }],
+        optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+        optionalManufacturerData: [0x0000, 0x0100, 0xFF01] 
+      });
 
       scaleDevice.addEventListener('advertisementreceived', handleBroadcast);
       await scaleDevice.watchAdvertisements();
