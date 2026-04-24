@@ -161,41 +161,40 @@
 }
 
   function handleBroadcast(event) {
-    let rawFound = false;
     let hexString = "";
 
-    // Check Manufacturer Data (Method A)
-    if (event.manufacturerData) {
-        event.manufacturerData.forEach((valueDataView) => {
-            hexString = Array.from(new Uint8Array(valueDataView.buffer))
-                             .map(b => b.toString(16).padStart(2, '0')).join('');
-            rawFound = true;
-        });
-    }
-
-    // Check Service Data (Method B - some firmware uses this)
-    if (!rawFound && event.serviceData) {
+    // Catch data from Manufacturer or Service fields
+    event.manufacturerData.forEach((valueDataView) => {
+        hexString += Array.from(new Uint8Array(valueDataView.buffer))
+                          .map(b => b.toString(16).padStart(2, '0')).join('');
+    });
+    
+    if (event.serviceData) {
         event.serviceData.forEach((valueDataView) => {
-            hexString = Array.from(new Uint8Array(valueDataView.buffer))
-                             .map(b => b.toString(16).padStart(2, '0')).join('');
-            rawFound = true;
+            hexString += Array.from(new Uint8Array(valueDataView.buffer))
+                              .map(b => b.toString(16).padStart(2, '0')).join('');
         });
     }
 
-    if (rawFound) {
+    if (hexString) {
         document.getElementById('debugConsole').innerText = "DATA DETECTED: " + hexString;
         
-        // Logic to extract weight from the 12-character hex string
-        if (hexString.length >= 12) {
-            let weightHex = hexString.substring(8, 12);
-            let rawDecimal = parseInt(weightHex, 16);
-            if (rawDecimal < 10000) {
+        // Based on your specific payload: 020311ffffffffffffff004001f4000e42
+        // The weight '01f4' (500) starts at character index 20.
+        try {
+            if (hexString.length >= 24) {
+                let weightHex = hexString.substring(20, 24); 
+                let rawDecimal = parseInt(weightHex, 16);
+                
+                // Conversion: If 01f4 (500) was a 5lb weight, we divide by 100
+                // Adjust the '100' below if the number on screen doesn't match your weight
                 currentWeight = (rawDecimal / 100).toFixed(2);
+                
                 document.getElementById('liveWeight').innerText = currentWeight;
             }
+        } catch (e) {
+            console.log("Parsing error: " + e);
         }
-    } else {
-        document.getElementById('debugConsole').innerText = "Signal detected, but no data payload found yet...";
     }
 }
 
