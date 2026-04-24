@@ -125,32 +125,40 @@
 
   // --- BLUETOOTH ADVERTISEMENT LISTENER ---
   async function connectScale() {
-    if (!navigator.bluetooth) {
-      alert("Web Bluetooth requires Chrome browser.");
-      return;
-    }
-    
-    try {
-      document.getElementById('bleBtn').innerText = "Scanning...";
-      
-      // Request device with watchAdvertisements capability
-      scaleDevice = await navigator.bluetooth.requestDevice({
-        acceptAllDevices: true
-      });
-
-      // Listen for the broadcast packets
-      scaleDevice.addEventListener('advertisementreceived', handleBroadcast);
-      await scaleDevice.watchAdvertisements();
-
-      document.getElementById('bleBtn').innerText = "Scale Linked";
-      document.getElementById('bleBtn').style.background = "var(--green)";
-      document.getElementById('weightDisplay').className = "weight-display connected";
-
-    } catch (error) {
-      document.getElementById('bleBtn').innerText = "Connect Scale";
-      console.log("Bluetooth Error: " + error);
-    }
+  if (!navigator.bluetooth) {
+    alert("Web Bluetooth requires Chrome.");
+    return;
   }
+  
+  try {
+    document.getElementById('bleBtn').innerText = "Scanning...";
+    
+    // We are looking for IF_B7 or WH- scales specifically
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'IF_' }, { namePrefix: 'WH' }],
+      optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+      // This part tells Chrome to keep the gate open for data
+      optionalManufacturerData: [0x0000, 0x0100, 0xFF01] 
+    });
+
+    // This is the line that was likely failing
+    device.addEventListener('advertisementreceived', handleBroadcast);
+    await device.watchAdvertisements();
+
+    scaleDevice = device;
+    document.getElementById('bleBtn').innerText = "LISTENING";
+    document.getElementById('bleBtn').style.background = "var(--green)";
+    document.getElementById('weightDisplay').className = "weight-display connected";
+    
+    showToast("Scale Found! Pull hook to see weight.", "blue");
+
+  } catch (error) {
+    document.getElementById('bleBtn').innerText = "Connect Scale";
+    console.log("Connect Error: " + error);
+    // If it fails here, the Debug box will show why
+    document.getElementById('debugConsole').innerText = "Error: " + error;
+  }
+}
 
   function handleBroadcast(event) {
     let rawFound = false;
