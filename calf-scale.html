@@ -21,17 +21,20 @@
   .brand-text { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; letter-spacing:1px; color:var(--orange); line-height:1; }
   .brand-sub { font-size:0.6rem; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
   
-  .status-bar { padding:7px 14px; display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; font-weight:600; }
+  .status-bar { padding:7px 14px; display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; font-weight:600; transition: background 0.3s; }
   .sheets-ok { background:#0a1a0a; border-bottom:1px solid var(--green); color:var(--green); }
   .sheets-err { background:#2a0a0a; border-bottom:1px solid var(--red); color:var(--red); }
-  .ble-btn { background:var(--blue); color:#fff; border:none; padding:6px 12px; border-radius:6px; font-family:'Oswald',sans-serif; font-weight:700; cursor:pointer; }
+  .ble-btn { background:var(--blue); color:#fff; border:none; padding:6px 12px; border-radius:6px; font-family:'Oswald',sans-serif; font-weight:700; cursor:pointer; transition: background 0.2s; }
   
   .main-content { padding: 20px; display:flex; flex-direction:column; flex:1; gap: 20px; }
   
   /* WEIGHT DISPLAY */
-  .weight-display { background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:30px 10px; text-align:center; transition: 0.3s; }
+  .weight-display { background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:30px 10px; text-align:center; transition: all 0.3s ease; }
   .weight-display.connected { border-color:var(--blue); background:#0a1a2a; border-style:solid; }
-  .weight-num { font-family:'Oswald',sans-serif; font-size:5rem; font-weight:700; color:var(--orange); line-height:1; }
+  .weight-display.saved { border-color:var(--green); background:#0a2a0a; border-style:solid; transform: scale(1.02); }
+  
+  .weight-num { font-family:'Oswald',sans-serif; font-size:5rem; font-weight:700; color:var(--orange); line-height:1; transition: color 0.3s; }
+  .weight-display.saved .weight-num { color:var(--green); }
   .weight-unit { font-size:1.2rem; color:var(--muted); font-weight:600; }
   
   /* INPUTS */
@@ -40,13 +43,13 @@
   .tag-input { background:var(--bg); border:2px solid var(--border); border-radius:8px; color:var(--text); font-family:monospace; font-size:1.2rem; padding:14px; outline:none; transition:border-color .15s; }
   .tag-input:focus { border-color:var(--orange); }
   
-  .save-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1.2rem; letter-spacing:1px; padding:16px; cursor:pointer; margin-top:10px; }
+  .save-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1.2rem; letter-spacing:1px; padding:16px; cursor:pointer; margin-top:10px; transition: background 0.2s; }
   .save-btn:disabled { opacity:0.4; cursor:not-allowed; }
 
   /* DEBUGGER */
   .debugger { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px; margin-top:auto; font-family:monospace; font-size:0.7rem; color:var(--muted); height:80px; overflow-y:auto; word-break:break-all; }
   
-  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#000; border:2px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-weight:600; z-index:999; display:none; }
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#000; border:2px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-weight:600; z-index:999; display:none; white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -97,9 +100,23 @@
   let tokenClient = null;
   let sheetId = localStorage.getItem('hm_sheet_id') || ''; 
   
-  // Scale Settings
-  let currentWeight = 0.00;
+  // Scale & Auto-Save Settings
   let scaleDevice = null;
+  let currentWeight = 0.00;
+  let previousWeight = 0.00;
+  let stabilizeTimer = null;
+  let hasAutoSaved = false;
+
+  // --- UI HELPERS ---
+  function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    if (type === 'blue') t.style.borderColor = 'var(--blue)';
+    else if (type === 'good') t.style.borderColor = 'var(--green)';
+    else if (type === 'warn') t.style.borderColor = 'var(--red)';
+    t.style.display = 'block';
+    setTimeout(() => { t.style.display = 'none'; t.style.borderColor = 'var(--green)'; }, 3000);
+  }
 
   // --- GOOGLE AUTH ---
   window.onload = function() {
@@ -115,150 +132,167 @@
           document.getElementById('sheetsBar').className = 'status-bar sheets-ok';
           document.getElementById('sheetsStatus').innerText = 'Ready to save data';
         } else {
-          document.getElementById('sheetsStatus').innerText = 'Error: Run Scanner App setup first to create Sheet';
+          document.getElementById('sheetsStatus').innerText = 'Error: Run Scanner App setup first';
         }
       }
     });
-
     document.getElementById('authBtn').onclick = () => { tokenClient.requestAccessToken({prompt: ''}); };
   };
 
-  function showToast(msg, type) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  // Apply colors based on type
-  if (type === 'blue') t.style.borderColor = 'var(--blue)';
-  else if (type === 'good') t.style.borderColor = 'var(--green)';
-  else if (type === 'warn') t.style.borderColor = 'var(--red)';
-  
-  t.style.display = 'block';
-  
-  // Hide it after 3 seconds
-  setTimeout(() => {
-    t.style.display = 'none';
-    t.style.borderColor = 'var(--green)'; // Reset to default
-  }, 3000);
-}
-
-
-  // --- BLUETOOTH ADVERTISEMENT LISTENER ---
+  // --- BLUETOOTH WITH MEMORY ---
   async function connectScale() {
-  if (!navigator.bluetooth) {
-    alert("Web Bluetooth requires Chrome.");
-    return;
-  }
-  
-  try {
-    document.getElementById('bleBtn').innerText = "Scanning...";
+    if (!navigator.bluetooth) { alert("Requires Chrome with flags enabled."); return; }
     
-    // We are looking for IF_B7 or WH- scales specifically
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'IF_' }, { namePrefix: 'WH' }],
-      optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
-      // This part tells Chrome to keep the gate open for data
-      optionalManufacturerData: [0x0000, 0x0100, 0xFF01] 
-    });
+    try {
+      document.getElementById('bleBtn').innerText = "Scanning...";
+      
+      // Step 1: Check if Chrome remembers the scale (skips popup!)
+      let devices = await navigator.bluetooth.getDevices();
+      
+      if (devices && devices.length > 0) {
+          scaleDevice = devices[0];
+          document.getElementById('debugConsole').innerText = "Found scale in memory. Connecting...";
+      } else {
+          // Step 2: Show popup if it's the first time
+          scaleDevice = await navigator.bluetooth.requestDevice({
+            filters: [{ namePrefix: 'IF_' }, { namePrefix: 'WH' }],
+            optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+            optionalManufacturerData: [0x0000, 0x0100, 0xFF01] 
+          });
+      }
 
-    // This is the line that was likely failing
-    device.addEventListener('advertisementreceived', handleBroadcast);
-    await device.watchAdvertisements();
+      scaleDevice.addEventListener('advertisementreceived', handleBroadcast);
+      await scaleDevice.watchAdvertisements();
 
-    scaleDevice = device;
-    document.getElementById('bleBtn').innerText = "LISTENING";
-    document.getElementById('bleBtn').style.background = "var(--green)";
-    document.getElementById('weightDisplay').className = "weight-display connected";
-    
-    showToast("Scale Found! Pull hook to see weight.", "blue");
+      document.getElementById('bleBtn').innerText = "LISTENING";
+      document.getElementById('bleBtn').style.background = "var(--green)";
+      document.getElementById('weightDisplay').className = "weight-display connected";
+      showToast("Scale Connected!", "blue");
 
-  } catch (error) {
-    document.getElementById('bleBtn').innerText = "Connect Scale";
-    console.log("Connect Error: " + error);
-    // If it fails here, the Debug box will show why
-    document.getElementById('debugConsole').innerText = "Error: " + error;
+    } catch (error) {
+      document.getElementById('bleBtn').innerText = "Connect Scale";
+      document.getElementById('debugConsole').innerText = "Error: " + error;
+    }
   }
-}
 
+  // --- DATA PARSER & AUTO-SAVE ENGINE ---
   function handleBroadcast(event) {
-    let hexString = "";
+      let hexString = "";
 
-    // Step 1: Collect the data from the scale's broadcast
-    event.manufacturerData.forEach((valueDataView) => {
-        hexString += Array.from(new Uint8Array(valueDataView.buffer))
-                          .map(b => b.toString(16).padStart(2, '0')).join('');
-    });
-    
-    if (event.serviceData) {
-        event.serviceData.forEach((valueDataView) => {
-            hexString += Array.from(new Uint8Array(valueDataView.buffer))
-                              .map(b => b.toString(16).padStart(2, '0')).join('');
-        });
-    }
+      if (event.manufacturerData) {
+          event.manufacturerData.forEach((valueDataView) => {
+              hexString += Array.from(new Uint8Array(valueDataView.buffer))
+                                .map(b => b.toString(16).padStart(2, '0')).join('');
+          });
+      }
+      
+      if (event.serviceData && !hexString) {
+          event.serviceData.forEach((valueDataView) => {
+              hexString += Array.from(new Uint8Array(valueDataView.buffer))
+                                .map(b => b.toString(16).padStart(2, '0')).join('');
+          });
+      }
 
-    // Step 2: Show the raw data in your log at the bottom
-    if (hexString) {
-        document.getElementById('debugConsole').innerText = "DATA DETECTED: " + hexString;
-        
-        // Step 3: THE PARSER
-        // Your payload: 020311ffffffffffffff0040 01f4 000e42
-        // We are grabbing the 4 characters starting at index 20 (01f4)
-        try {
-            if (hexString.length >= 24) {
-                let weightHex = hexString.substring(20, 24); 
-                let rawDecimal = parseInt(weightHex, 16); // This turns '01f4' into 500
-                
-                // Conversions:
-                // If the scale says 11.0 lbs and the app says 5.00, we change the math below.
-                // For now, let's assume it's transmitting in 1/100ths of a unit.
-                currentWeight = (rawDecimal / 100).toFixed(2);
-                
-                // Step 4: Push the weight to the big orange display
-                document.getElementById('liveWeight').innerText = currentWeight;
-            }
-        } catch (e) {
-            document.getElementById('debugConsole').innerText = "Parsing error: " + e;
-        }
-    }
-}
+      if (hexString) {
+          document.getElementById('debugConsole').innerText = "DATA DETECTED: " + hexString;
+          
+          try {
+              if (hexString.length >= 24) {
+                  let weightHex = hexString.substring(20, 24); 
+                  let rawDecimal = parseInt(weightHex, 16);
+                  currentWeight = (rawDecimal / 100).toFixed(2);
+                  
+                  document.getElementById('liveWeight').innerText = currentWeight;
 
-  // --- SAVE TO GOOGLE SHEETS ---
+                  // --- THE AUTO-SAVE LOGIC ---
+                  
+                  // Reset the app if weight drops back to near-zero
+                  if (currentWeight < 0.50) {
+                      hasAutoSaved = false;
+                      clearTimeout(stabilizeTimer);
+                  }
+
+                  // If there is actual weight on the scale and we haven't saved it yet
+                  if (currentWeight > 1.00 && !hasAutoSaved) {
+                      
+                      // If the weight jumps, reset the timer
+                      if (currentWeight !== previousWeight) {
+                          clearTimeout(stabilizeTimer);
+                          
+                          // Set a new 2.5 second timer
+                          stabilizeTimer = setTimeout(() => {
+                              // After 2.5s of no bouncing, check for a tag and save!
+                              let tag = document.getElementById('tagInput').value.trim();
+                              if (tag) {
+                                  saveToSheet();
+                                  hasAutoSaved = true; // Lock out until calf is removed
+                              } else {
+                                  showToast("Weight Locked! Enter tag to save.", "warn");
+                              }
+                          }, 2500);
+                      }
+                  }
+                  
+                  previousWeight = currentWeight;
+              }
+          } catch (e) {
+              document.getElementById('debugConsole').innerText = "Parsing error: " + e;
+          }
+      }
+  }
+
+  // --- PUSH TO GOOGLE SHEETS ---
   function saveToSheet() {
     let tag = document.getElementById('tagInput').value.trim();
-    if (!tag) { alert("Please enter or scan a Calf Tag"); return; }
-    if (!accessToken || !sheetId) { alert("Please Sign In to Google first."); return; }
+    if (!tag) { showToast("Please enter a Calf Tag", "warn"); return; }
+    if (!accessToken || !sheetId) { showToast("Sign In to Google first.", "warn"); return; }
 
     let btn = document.getElementById('saveBtn');
+    let display = document.getElementById('weightDisplay');
+    
     btn.innerText = "SAVING...";
     btn.disabled = true;
+    display.className = "weight-display saved"; // Turn big box green
 
     let now = new Date();
     let dateStr = now.toLocaleDateString();
-    let timeStr = now.toLocaleTimeString();
-
-    // Appending to the "Animals" tab. Columns: Tag EPC, Animal ID, Sex, Breed, DOB, Dam Tag, Sire Tag, Notes, Weight
-    // Note: I am placing the Weight in column I (index 8). 
     let row = [[tag, "", "", "", dateStr, "", "", "Birth Weight: " + currentWeight + " lbs", currentWeight]];
 
     fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Animals!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + accessToken,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
       body: JSON.stringify({ values: row })
     }).then(res => {
       if (res.ok) {
-        document.getElementById('toast').style.display = 'block';
-        setTimeout(() => { document.getElementById('toast').style.display = 'none'; }, 3000);
-        document.getElementById('tagInput').value = '';
+        showToast("✓ SAVED TO HERDMATE", "good");
+        
+        // Play a nice success beep if sound is on
+        try { 
+          let ctx = new (window.AudioContext || window.webkitAudioContext)();
+          let o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 880;
+          o.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.2);
+        } catch(e) {}
+
+        // Vibrate the phone
+        if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+        
+        document.getElementById('tagInput').value = ''; // clear tag for next calf
       } else {
-        alert("Failed to save to sheet.");
+        showToast("Save Failed!", "warn");
       }
-      btn.innerText = "SAVE TO HERDMATE";
-      btn.disabled = false;
+      
+      // Reset button and display color after a moment
+      setTimeout(() => {
+        btn.innerText = "SAVE TO HERDMATE";
+        btn.disabled = false;
+        display.className = "weight-display connected";
+      }, 2000);
+
     }).catch(err => {
-      alert("Network error.");
+      showToast("Network Error", "warn");
       btn.innerText = "SAVE TO HERDMATE";
       btn.disabled = false;
+      display.className = "weight-display connected";
     });
   }
 </script>
