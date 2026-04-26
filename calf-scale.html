@@ -21,20 +21,17 @@
   .brand-text { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; letter-spacing:1px; color:var(--orange); line-height:1; }
   .brand-sub { font-size:0.6rem; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
   
-  .status-bar { padding:7px 14px; display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; font-weight:600; transition: background 0.3s; }
+  .status-bar { padding:7px 14px; display:flex; align-items:center; justify-content:space-between; font-size:0.75rem; font-weight:600; }
   .sheets-ok { background:#0a1a0a; border-bottom:1px solid var(--green); color:var(--green); }
   .sheets-err { background:#2a0a0a; border-bottom:1px solid var(--red); color:var(--red); }
-  .ble-btn { background:var(--blue); color:#fff; border:none; padding:6px 12px; border-radius:6px; font-family:'Oswald',sans-serif; font-weight:700; cursor:pointer; transition: background 0.2s; }
+  .ble-btn { background:var(--blue); color:#fff; border:none; padding:6px 12px; border-radius:6px; font-family:'Oswald',sans-serif; font-weight:700; cursor:pointer; }
   
   .main-content { padding: 20px; display:flex; flex-direction:column; flex:1; gap: 20px; }
   
   /* WEIGHT DISPLAY */
-  .weight-display { background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:30px 10px; text-align:center; transition: all 0.3s ease; }
+  .weight-display { background:var(--panel); border:2px dashed var(--border); border-radius:12px; padding:30px 10px; text-align:center; transition: 0.3s; }
   .weight-display.connected { border-color:var(--blue); background:#0a1a2a; border-style:solid; }
-  .weight-display.saved { border-color:var(--green); background:#0a2a0a; border-style:solid; transform: scale(1.02); }
-  
-  .weight-num { font-family:'Oswald',sans-serif; font-size:5rem; font-weight:700; color:var(--orange); line-height:1; transition: color 0.3s; }
-  .weight-display.saved .weight-num { color:var(--green); }
+  .weight-num { font-family:'Oswald',sans-serif; font-size:5rem; font-weight:700; color:var(--orange); line-height:1; }
   .weight-unit { font-size:1.2rem; color:var(--muted); font-weight:600; }
   
   /* INPUTS */
@@ -43,13 +40,13 @@
   .tag-input { background:var(--bg); border:2px solid var(--border); border-radius:8px; color:var(--text); font-family:monospace; font-size:1.2rem; padding:14px; outline:none; transition:border-color .15s; }
   .tag-input:focus { border-color:var(--orange); }
   
-  .save-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1.2rem; letter-spacing:1px; padding:16px; cursor:pointer; margin-top:10px; transition: background 0.2s; }
+  .save-btn { background:var(--orange); border:none; border-radius:8px; color:#000; font-family:'Oswald',sans-serif; font-weight:700; font-size:1.2rem; letter-spacing:1px; padding:16px; cursor:pointer; margin-top:10px; }
   .save-btn:disabled { opacity:0.4; cursor:not-allowed; }
 
   /* DEBUGGER */
   .debugger { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px; margin-top:auto; font-family:monospace; font-size:0.7rem; color:var(--muted); height:80px; overflow-y:auto; word-break:break-all; }
   
-  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#000; border:2px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-weight:600; z-index:999; display:none; white-space:nowrap;}
+  .toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#000; border:2px solid var(--green); color:var(--green); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-weight:600; z-index:999; display:none; }
 </style>
 </head>
 <body>
@@ -72,7 +69,7 @@
   <div class="main-content">
     
     <div class="weight-display" id="weightDisplay">
-      <div class="weight-num" id="liveWeight">0.00</div>
+      <div class="weight-num" id="liveWeight">0.0</div>
       <div class="weight-unit">LBS</div>
     </div>
 
@@ -82,6 +79,15 @@
     </div>
 
     <button class="save-btn" id="saveBtn" onclick="saveToSheet()">SAVE TO HERDMATE</button>
+
+    <div class="input-group" style="margin-top:20px; border-top:1px solid var(--border); padding-top:15px;">
+      <span class="input-label">Calibration (Hang known weight first)</span>
+      <div style="display:flex; gap:10px;">
+        <input type="number" step="0.1" id="calInput" class="tag-input" style="flex:1; min-height:50px; padding:10px;" placeholder="e.g. 10.0" />
+        <button class="save-btn" style="margin-top:0; min-height:50px; min-width:80px; padding:10px;" onclick="calibrateScale()">SET</button>
+      </div>
+      <span style="font-size:0.7rem; color:var(--muted); margin-top:5px;" id="calStatus">Multiplier: 1.000</span>
+    </div>
 
     <div class="input-group">
       <span class="input-label">Raw Bluetooth Data (Debug)</span>
@@ -98,25 +104,19 @@
   const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
   let accessToken = null;
   let tokenClient = null;
-  let sheetId = localStorage.getItem('hm_sheet_id') || ''; 
+  let sheetId = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI'; // Master Sheet ID
   
-  // Scale & Auto-Save Settings
+  // Scale Settings
+  let currentWeight = "0.0"; // Now stored with 1 decimal place
   let scaleDevice = null;
-  let currentWeight = 0.00;
-  let previousWeight = 0.00;
-  let stabilizeTimer = null;
-  let hasAutoSaved = false;
+  let calMultiplier = parseFloat(localStorage.getItem('hm_cal_mult')) || 1.000;
 
-  // --- UI HELPERS ---
-  function showToast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg;
-    if (type === 'blue') t.style.borderColor = 'var(--blue)';
-    else if (type === 'good') t.style.borderColor = 'var(--green)';
-    else if (type === 'warn') t.style.borderColor = 'var(--red)';
-    t.style.display = 'block';
-    setTimeout(() => { t.style.display = 'none'; t.style.borderColor = 'var(--green)'; }, 3000);
-  }
+  // Update UI with saved multiplier on load
+  window.addEventListener('DOMContentLoaded', () => {
+      if (document.getElementById('calStatus')) {
+          document.getElementById('calStatus').innerText = "Multiplier: " + calMultiplier.toFixed(3);
+      }
+  });
 
   // --- GOOGLE AUTH ---
   window.onload = function() {
@@ -132,161 +132,137 @@
           document.getElementById('sheetsBar').className = 'status-bar sheets-ok';
           document.getElementById('sheetsStatus').innerText = 'Ready to save data';
         } else {
-          document.getElementById('sheetsStatus').innerText = 'Error: Run Scanner App setup first';
+          document.getElementById('sheetsStatus').innerText = 'Error: Run Scanner App setup first to create Sheet';
         }
       }
     });
+
     document.getElementById('authBtn').onclick = () => { tokenClient.requestAccessToken({prompt: ''}); };
   };
 
-  // --- BLUETOOTH WITH MEMORY ---
-    // --- BLUETOOTH (RELIABLE POPUP METHOD) ---
+  // --- BLUETOOTH ADVERTISEMENT LISTENER ---
   async function connectScale() {
-    if (!navigator.bluetooth) { alert("Requires Chrome with flags enabled."); return; }
+    if (!navigator.bluetooth) {
+      alert("Web Bluetooth requires Chrome browser.");
+      return;
+    }
     
     try {
       document.getElementById('bleBtn').innerText = "Scanning...";
       
-      // We removed the 'getDevices' memory trick. 
-      // This forces the Chrome popup so we always catch the LIVE broadcast footprint.
       scaleDevice = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'IF_' }, { namePrefix: 'WH' }],
-        optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
-        optionalManufacturerData: [0x0000, 0x0100, 0xFF01] 
+        acceptAllDevices: true
       });
 
       scaleDevice.addEventListener('advertisementreceived', handleBroadcast);
       await scaleDevice.watchAdvertisements();
 
-      document.getElementById('bleBtn').innerText = "LISTENING";
+      document.getElementById('bleBtn').innerText = "Scale Linked";
       document.getElementById('bleBtn').style.background = "var(--green)";
       document.getElementById('weightDisplay').className = "weight-display connected";
-      showToast("Scale Connected!", "blue");
 
     } catch (error) {
       document.getElementById('bleBtn').innerText = "Connect Scale";
-      document.getElementById('debugConsole').innerText = "Error: " + error;
+      console.log("Bluetooth Error: " + error);
     }
   }
 
-  // --- DATA PARSER & AUTO-SAVE ENGINE ---
   function handleBroadcast(event) {
-      let hexString = "";
-
-      if (event.manufacturerData) {
-          event.manufacturerData.forEach((valueDataView) => {
-              hexString += Array.from(new Uint8Array(valueDataView.buffer))
-                                .map(b => b.toString(16).padStart(2, '0')).join('');
-          });
-      }
+    event.manufacturerData.forEach((valueDataView, key) => {
+      let hexString = Array.from(new Uint8Array(valueDataView.buffer))
+                           .map(b => b.toString(16).padStart(2, '0')).join('');
       
-      if (event.serviceData && !hexString) {
-          event.serviceData.forEach((valueDataView) => {
-              hexString += Array.from(new Uint8Array(valueDataView.buffer))
-                                .map(b => b.toString(16).padStart(2, '0')).join('');
-          });
-      }
+      document.getElementById('debugConsole').innerText = "Payload: " + hexString;
 
-      if (hexString) {
-          document.getElementById('debugConsole').innerText = "DATA DETECTED: " + hexString;
-          
-          try {
-              if (hexString.length >= 24) {
-                  let weightHex = hexString.substring(20, 24); 
-                  let rawDecimal = parseInt(weightHex, 16);
-                  currentWeight = (rawDecimal / 100).toFixed(2);
-                  
-                  document.getElementById('liveWeight').innerText = currentWeight;
-
-                  // --- THE AUTO-SAVE LOGIC ---
-                  
-                  // Reset the app if weight drops back to near-zero
-                  if (currentWeight < 0.50) {
-                      hasAutoSaved = false;
-                      clearTimeout(stabilizeTimer);
-                  }
-
-                  // If there is actual weight on the scale and we haven't saved it yet
-                  if (currentWeight > 1.00 && !hasAutoSaved) {
-                      
-                      // If the weight jumps, reset the timer
-                      if (currentWeight !== previousWeight) {
-                          clearTimeout(stabilizeTimer);
-                          
-                          // Set a new 2.5 second timer
-                          stabilizeTimer = setTimeout(() => {
-                              // After 2.5s of no bouncing, check for a tag and save!
-                              let tag = document.getElementById('tagInput').value.trim();
-                              if (tag) {
-                                  saveToSheet();
-                                  hasAutoSaved = true; // Lock out until calf is removed
-                              } else {
-                                  showToast("Weight Locked! Enter tag to save.", "warn");
-                              }
-                          }, 2500);
-                      }
-                  }
-                  
-                  previousWeight = currentWeight;
-              }
-          } catch (e) {
-              document.getElementById('debugConsole').innerText = "Parsing error: " + e;
-          }
-      }
+      try {
+        if (hexString.length >= 12) {
+            let weightHex = hexString.substring(8, 12);
+            let rawDecimal = parseInt(weightHex, 16);
+            
+            if (rawDecimal < 10000) {
+                let rawWeight = rawDecimal / 100;
+                // Apply the calibration multiplier and force strictly 1 decimal place!
+                currentWeight = (rawWeight * calMultiplier).toFixed(1);
+                document.getElementById('liveWeight').innerText = currentWeight;
+            }
+        }
+      } catch (e) { }
+    });
   }
 
-  // --- PUSH TO GOOGLE SHEETS ---
+  // --- CALIBRATION ENGINE ---
+  function calibrateScale() {
+      let knownWeight = parseFloat(document.getElementById('calInput').value);
+      let currentNum = parseFloat(currentWeight);
+      
+      if (!knownWeight || knownWeight <= 0) {
+          alert("Enter the exact weight of your dumbbell (e.g., 10.0)");
+          return;
+      }
+      if (currentNum <= 0) {
+          alert("Hang the dumbbell on the scale first!");
+          return;
+      }
+
+      // Reverse math to find what the scale ACTUALLY sees, uncorrected
+      let rawScaleWeight = currentNum / calMultiplier; 
+      // Generate the new correction multiplier
+      calMultiplier = knownWeight / rawScaleWeight;
+      
+      // Save to memory
+      localStorage.setItem('hm_cal_mult', calMultiplier.toString());
+      document.getElementById('calStatus').innerText = "Multiplier: " + calMultiplier.toFixed(3);
+      
+      // Instantly update the orange screen to your exact known weight
+      currentWeight = knownWeight.toFixed(1);
+      document.getElementById('liveWeight').innerText = currentWeight;
+      document.getElementById('calInput').value = '';
+
+      let toast = document.getElementById('toast');
+      toast.innerText = "Scale Calibrated!";
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3000);
+  }
+
+  // --- SAVE TO GOOGLE SHEETS ---
   function saveToSheet() {
     let tag = document.getElementById('tagInput').value.trim();
-    if (!tag) { showToast("Please enter a Calf Tag", "warn"); return; }
-    if (!accessToken || !sheetId) { showToast("Sign In to Google first.", "warn"); return; }
+    if (!tag) { alert("Please enter or scan a Calf Tag"); return; }
+    if (!accessToken || !sheetId) { alert("Please Sign In to Google first."); return; }
 
     let btn = document.getElementById('saveBtn');
-    let display = document.getElementById('weightDisplay');
-    
     btn.innerText = "SAVING...";
     btn.disabled = true;
-    display.className = "weight-display saved"; // Turn big box green
 
     let now = new Date();
     let dateStr = now.toLocaleDateString();
+    let timeStr = now.toLocaleTimeString();
+
     let row = [[tag, "", "", "", dateStr, "", "", "Birth Weight: " + currentWeight + " lbs", currentWeight]];
 
     fetch(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Animals!A:I:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`, {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      headers: {
+        'Authorization': 'Bearer ' + accessToken,
+        'Content-Type': 'application/json'
+      },
       body: JSON.stringify({ values: row })
     }).then(res => {
       if (res.ok) {
-        showToast("✓ SAVED TO HERDMATE", "good");
-        
-        // Play a nice success beep if sound is on
-        try { 
-          let ctx = new (window.AudioContext || window.webkitAudioContext)();
-          let o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = 880;
-          o.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.2);
-        } catch(e) {}
-
-        // Vibrate the phone
-        if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-        
-        document.getElementById('tagInput').value = ''; // clear tag for next calf
+        let toast = document.getElementById('toast');
+        toast.innerText = "Saved to Sheets!";
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 3000);
+        document.getElementById('tagInput').value = '';
       } else {
-        showToast("Save Failed!", "warn");
+        alert("Failed to save to sheet.");
       }
-      
-      // Reset button and display color after a moment
-      setTimeout(() => {
-        btn.innerText = "SAVE TO HERDMATE";
-        btn.disabled = false;
-        display.className = "weight-display connected";
-      }, 2000);
-
-    }).catch(err => {
-      showToast("Network Error", "warn");
       btn.innerText = "SAVE TO HERDMATE";
       btn.disabled = false;
-      display.className = "weight-display connected";
+    }).catch(err => {
+      alert("Network error.");
+      btn.innerText = "SAVE TO HERDMATE";
+      btn.disabled = false;
     });
   }
 </script>
