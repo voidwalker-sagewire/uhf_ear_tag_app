@@ -176,7 +176,7 @@
 
       try {
         if (hexString.length >= 12) {
-            let weightHex = hexString.substring(8, 12);
+            let weightHex = hexString.substring(20, 24);
             let rawDecimal = parseInt(weightHex, 16);
             
             if (rawDecimal < 10000) {
