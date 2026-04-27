@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
-<title>HerdMate Vet AI</title>
+<title>DAVE — HerdMate Field Vet</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
 
@@ -79,24 +79,29 @@
 
 <header>
   <div>
-    <div class="logo">🐄 HerdMate Vet AI</div>
-    <div class="logo-sub">Field Veterinary Assistant</div>
+    <div class="logo">🐄 DAVE by HerdMate</div>
+    <div class="logo-sub">Don't Always Visit the Emergency vet</div>
   </div>
   <div class="hdr-right">
+    <button class="hdr-btn" id="ttsToggle" onclick="toggleTTS()" title="DAVE speaks answers aloud">🔇 DAVE Silent</button>
+    <div id="speedWrap" style="display:none;align-items:center;gap:4px;">
+      <span style="font-size:0.65rem;color:var(--muted);">Speed</span>
+      <input type="range" id="ttsSpeed" min="0.5" max="2.0" step="0.1" value="1.1" style="width:60px;accent-color:var(--orange);" />
+    </div>
     <a href="/" class="hdr-btn">← Scanner</a>
   </div>
 </header>
 
-<div class="status-bar warn" id="statusBar">⏳ Connecting to knowledge base...</div>
+<div class="status-bar warn" id="statusBar">⏳ Waking up DAVE...</div>
 
 <div class="disclaimer">
-  <strong>⚠️ Field Reference Only</strong> — HerdMate Vet AI is a knowledge assistant, not a licensed veterinarian. Always call your vet for serious conditions. Use this to help you describe symptoms, identify possibilities, and decide urgency.
+  <strong>⚠️ Field Reference Only</strong> — DAVE is a knowledge assistant, not a licensed veterinarian. Always call your vet for serious conditions. Use this to help you describe symptoms, identify possibilities, and decide urgency.
 </div>
 
 <div class="chat-wrap" id="chatWrap">
   <div class="empty-state" id="emptyState">
     <div class="empty-icon">🏥</div>
-    <div class="empty-title">What's going on with your animal?</div>
+    <div class="empty-title">Hey. I'm DAVE. What's going on with your animal?</div>
     <div class="empty-desc">Describe what you're seeing. Plain language. I'll tell you what it might be and what to do right now.</div>
     <div style="margin-top:16px;">
       <div class="quick-q" onclick="quickAsk('Calf born weak, won\\'t stand, breathing shallow. What do I do?')">Weak newborn calf</div>
@@ -117,7 +122,7 @@
   </div>
   <div class="input-row">
     <textarea id="questionInput" placeholder="Describe what you're seeing... plain language is fine." rows="1"></textarea>
-    <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK</button>
+    <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK DAVE</button>
   </div>
 </div>
 
@@ -125,7 +130,7 @@
 (function() {
   // ── CONFIG ──
   // Update this to your DigitalOcean server URL when deployed
-  var API_BASE = 'https://api.herdmate.ag';  // UPDATE THIS
+  var API_BASE = 'https://your-droplet-ip:8001';  // UPDATE THIS
   var OPERATION = localStorage.getItem('hm_operation') || 'HerdMate';
 
   var messages = [];
@@ -138,16 +143,16 @@
       .then(function(data) {
         var bar = document.getElementById('statusBar');
         if (data.vet_knowledge_docs > 0) {
-          bar.textContent = '✅ Knowledge base ready — ' + data.vet_knowledge_docs + ' veterinary references';
+          bar.textContent = '✅ DAVE is ready — ' + data.vet_knowledge_docs + ' veterinary references loaded';
           bar.className = 'status-bar ok';
         } else {
-          bar.textContent = '⚠️ Knowledge base empty — run ingestion script on server';
+          bar.textContent = '⚠️ DAVE has no knowledge yet — run ingestion script on server';
           bar.className = 'status-bar warn';
         }
       })
       .catch(function() {
         var bar = document.getElementById('statusBar');
-        bar.textContent = '❌ Vet AI offline — check server connection';
+        bar.textContent = '❌ DAVE is offline — check server connection';
         bar.className = 'status-bar err';
       });
   }
@@ -212,7 +217,7 @@
     })
     .catch(function(err) {
       typingEl.remove();
-      addMessage('assistant', '❌ Could not reach HerdMate Vet AI. Check your connection or server status.');
+      addMessage('assistant', '❌ Could not reach DAVE. Check your connection or server status.');
     })
     .finally(function() {
       isLoading = false;
@@ -266,6 +271,8 @@
 
     wrap.appendChild(div);
     wrap.scrollTop = wrap.scrollHeight;
+    // Speak the answer if DAVE voice is on
+    if (ttsEnabled && data.answer) speakText(data.answer);
   }
 
   function addTyping() {
@@ -287,6 +294,77 @@
       .replace(/</g,'&lt;')
       .replace(/>/g,'&gt;')
       .replace(/"/g,'&quot;');
+  }
+
+  // ── TTS / DAVE VOICE ──
+  var TTS_BASE = 'https://api.herdmate.ag';
+  var ttsEnabled = false;
+  var ttsAudio = null;
+
+  window.toggleTTS = function() {
+    ttsEnabled = !ttsEnabled;
+    var btn = document.getElementById('ttsToggle');
+    var speedWrap = document.getElementById('speedWrap');
+    if (ttsEnabled) {
+      btn.textContent = '🔊 DAVE Speaks';
+      btn.style.borderColor = 'var(--orange)';
+      btn.style.color = 'var(--orange)';
+      speedWrap.style.display = 'flex';
+      // Test it
+      speakText('DAVE is ready.');
+    } else {
+      btn.textContent = '🔇 DAVE Silent';
+      btn.style.borderColor = '';
+      btn.style.color = '';
+      speedWrap.style.display = 'none';
+      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+    }
+  };
+
+  function stripMarkdown(text) {
+    var t = text;
+    t = t.replace(/#{1,6} /g, '');
+    t = t.replace(/\*\*([^*]+)\*\*/g, '$1');
+    t = t.replace(/\*([^*]+)\*/g, '$1');
+    t = t.replace(/`([^`]+)`/g, '$1');
+    t = t.replace(/---/g, '. ');
+    t = t.replace(/
+
+/g, '. ');
+    t = t.replace(/
+/g, '. ');
+    t = t.replace(/\.\.+/g, '.');
+    t = t.replace(/  +/g, ' ');
+    return t.trim();
+  }
+
+  function speakText(text) {
+    if (!ttsEnabled) return;
+    var clean = stripMarkdown(text);
+    // Trim to first 600 chars so it's fast not a lecture
+    if (clean.length > 600) clean = clean.substring(0, 600) + '. See full response on screen.';
+
+    fetch(TTS_BASE + '/speak', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: clean })
+    })
+    .then(function(r) {
+      if (!r.ok) throw new Error('TTS failed');
+      return r.blob();
+    })
+    .then(function(blob) {
+      var url = URL.createObjectURL(blob);
+      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
+      ttsAudio = new Audio(url);
+      var speed = parseFloat(document.getElementById('ttsSpeed').value) || 1.1;
+      ttsAudio.playbackRate = speed;
+      ttsAudio.play();
+      ttsAudio.onended = function() { URL.revokeObjectURL(url); };
+    })
+    .catch(function() {
+      // TTS failed silently — screen still shows answer
+    });
   }
 
   // Init
