@@ -79,7 +79,7 @@
 
 <header>
   <div>
-    <div class="logo">🐄 DAVE by HerdMate</div>
+    <div class="logo">🐄 DAVE</div>
     <div class="logo-sub">Don't Always Visit the Emergency vet</div>
   </div>
   <div class="hdr-right">
@@ -130,7 +130,7 @@
 (function() {
   // ── CONFIG ──
   // Update this to your DigitalOcean server URL when deployed
-  var API_BASE = 'https://api.herdmate.ag';  // UPDATE THIS
+  var API_BASE = 'https://your-droplet-ip:8001';  // UPDATE THIS
   var OPERATION = localStorage.getItem('hm_operation') || 'HerdMate';
 
   var messages = [];
@@ -328,12 +328,9 @@
     t = t.replace(/\*([^*]+)\*/g, '$1');
     t = t.replace(/`([^`]+)`/g, '$1');
     t = t.replace(/---/g, '. ');
-    t = t.replace(/
-
-/g, '. ');
-    t = t.replace(/
-/g, '. ');
-    t = t.replace(/\.\.+/g, '.');
+    t = t.replace(/\n\n/g, '. ');
+    t = t.replace(/\n/g, '. ');
+    t = t.replace(/\.\./g, '.');
     t = t.replace(/  +/g, ' ');
     return t.trim();
   }
