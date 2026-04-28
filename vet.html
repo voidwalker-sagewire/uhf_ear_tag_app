@@ -237,14 +237,14 @@
     if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
 
     var requestBody = {
-    question: q,
-    operation: OPERATION,
-    pasture: pasture || null,
-    weather: weather || null,
-    tag_epc: tag || null,
-    user_id: OPERATION,
-    conversation_history: conversationHistory.slice()  // full history including previous answers
-  };
+      question: q,
+      operation: OPERATION,
+      pasture: pasture || null,
+      weather: weather || null,
+      tag_epc: tag || null,
+      user_id: OPERATION,
+      conversation_history: conversationHistory.slice(0, -1)  // send history BEFORE this message
+    };
 
     // Attach photo if present
     if (pendingPhoto) {
@@ -259,15 +259,16 @@
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-    typingEl.remove();
-    addAssistantMessage(data);
-    if (data.answer) {
-      conversationHistory.push({ role: 'user', content: q });
-      conversationHistory.push({ role: 'assistant', content: data.answer });
-      if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
-    }
-    clearPhoto();
-  })
+      typingEl.remove();
+      addAssistantMessage(data);
+      // Add DAVE's answer to conversation history
+      if (data.answer) {
+        conversationHistory.push({ role: 'assistant', content: data.answer });
+        if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+      }
+      // Clear photo after sending
+      clearPhoto();
+    })
     .catch(function(err) {
       typingEl.remove();
       addMessage('assistant', '❌ Could not reach DAVE. Check your connection or server status.');
