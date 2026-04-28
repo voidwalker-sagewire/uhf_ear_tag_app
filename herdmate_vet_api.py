@@ -31,7 +31,7 @@ app = FastAPI(title="HerdMate Vet AI", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://scanner.herdmate.ag", "http://localhost"],
+    allow_origins=["https://scanner.herdmate.ag", "https://api.herdmate.ag", "http://localhost", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -197,27 +197,39 @@ async def ask_vet(q: VetQuestion):
     if q.operation:
         field_context += f"Operation: {q.operation}\n"
 
-    user_message = f"""Field context:
-{field_context if field_context else "No specific field context provided"}
+    # Build dynamic system prompt — RAG context goes HERE not in user message
+    # This keeps conversation history clean and natural
+    dynamic_system = VET_SYSTEM_PROMPT
 
-Question: {q.question}
-{vet_context}
-{memory_context}"""
+    if field_context:
+        dynamic_system += f"
 
-    # Build messages with conversation history (sliding window)
+--- CURRENT FIELD CONTEXT ---
+{field_context}"
+
+    if vet_context:
+        dynamic_system += f"
+
+--- RELEVANT VETERINARY KNOWLEDGE ---{vet_context}"
+
+    if memory_context:
+        dynamic_system += f"
+
+--- THIS RANCHER'S PAST FIELD CASES ---{memory_context}"
+
+    # Build clean conversation messages — just the actual conversation
     claude_messages = []
 
-    # Add conversation history (last 8 messages max)
+    # Add conversation history as clean alternating turns (last 8 messages max)
     if q.conversation_history:
         for msg in q.conversation_history[-8:]:
-            claude_messages.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if content:
+                claude_messages.append({"role": role, "content": content})
 
-    # Build current user message — with or without image
+    # Current user message — plain question with optional image
     if q.image_base64:
-        # Visual analysis — include the image
         current_content = [
             {
                 "type": "image",
@@ -229,11 +241,11 @@ Question: {q.question}
             },
             {
                 "type": "text",
-                "text": user_message
+                "text": q.question
             }
         ]
     else:
-        current_content = user_message
+        current_content = q.question
 
     claude_messages.append({"role": "user", "content": current_content})
 
@@ -242,7 +254,7 @@ Question: {q.question}
         response = claude.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=600,
-            system=VET_SYSTEM_PROMPT,
+            system=dynamic_system,
             messages=claude_messages
         )
         answer = response.content[0].text
