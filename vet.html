@@ -122,7 +122,14 @@
   </div>
   <div class="input-row">
     <textarea id="questionInput" placeholder="Describe what you're seeing... plain language is fine." rows="1"></textarea>
+    <label for="photoInput" class="ask-btn" style="display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--panel2);border:2px solid var(--border);color:var(--muted);min-width:52px;" title="Attach a photo for DAVE to analyze">📷</label>
+    <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)" />
     <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK DAVE</button>
+  </div>
+  <div id="photoPreviewBar" style="display:none;align-items:center;gap:8px;padding:4px 0;">
+    <img id="photoPreview" style="height:40px;border-radius:6px;border:1px solid var(--orange);" />
+    <span style="font-size:0.72rem;color:var(--orange);">📷 Photo attached</span>
+    <button onclick="clearPhoto()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;">✕</button>
   </div>
 </div>
 
@@ -133,8 +140,10 @@
   var API_BASE = 'https://api.herdmate.ag';
   var OPERATION = localStorage.getItem('hm_operation') || 'HerdMate';
 
-  var messages = [];
+  var conversationHistory = [];  // sliding window — last 8 exchanges
+  var MAX_HISTORY = 8;
   var isLoading = false;
+  var pendingPhoto = null;  // base64 encoded photo
 
   // Check API status on load
   function checkStatus() {
@@ -175,6 +184,31 @@
     askQuestion();
   };
 
+  window.handlePhoto = function(input) {
+    if (!input.files || !input.files[0]) return;
+    var file = input.files[0];
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      var dataUrl = e.target.result;
+      // Strip the data:image/jpeg;base64, prefix
+      pendingPhoto = {
+        base64: dataUrl.split(',')[1],
+        type: file.type || 'image/jpeg',
+        url: dataUrl
+      };
+      // Show preview
+      document.getElementById('photoPreview').src = dataUrl;
+      document.getElementById('photoPreviewBar').style.display = 'flex';
+    };
+    reader.readAsDataURL(file);
+  };
+
+  window.clearPhoto = function() {
+    pendingPhoto = null;
+    document.getElementById('photoInput').value = '';
+    document.getElementById('photoPreviewBar').style.display = 'none';
+  };
+
   window.askQuestion = function() {
     if (isLoading) return;
     var q = document.getElementById('questionInput').value.trim();
@@ -198,22 +232,42 @@
     var weather = document.getElementById('ctxWeather').value.trim();
     var tag = document.getElementById('ctxTag').value.trim();
 
+    // Add user message to history
+    conversationHistory.push({ role: 'user', content: q });
+    if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+
+    var requestBody = {
+      question: q,
+      operation: OPERATION,
+      pasture: pasture || null,
+      weather: weather || null,
+      tag_epc: tag || null,
+      user_id: OPERATION,
+      conversation_history: conversationHistory.slice(0, -1)  // send history BEFORE this message
+    };
+
+    // Attach photo if present
+    if (pendingPhoto) {
+      requestBody.image_base64 = pendingPhoto.base64;
+      requestBody.image_type = pendingPhoto.type;
+    }
+
     fetch(API_BASE + '/vet/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question: q,
-        operation: OPERATION,
-        pasture: pasture || null,
-        weather: weather || null,
-        tag_epc: tag || null,
-        user_id: OPERATION
-      })
+      body: JSON.stringify(requestBody)
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       typingEl.remove();
       addAssistantMessage(data);
+      // Add DAVE's answer to conversation history
+      if (data.answer) {
+        conversationHistory.push({ role: 'assistant', content: data.answer });
+        if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+      }
+      // Clear photo after sending
+      clearPhoto();
     })
     .catch(function(err) {
       typingEl.remove();
