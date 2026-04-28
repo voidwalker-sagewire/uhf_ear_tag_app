@@ -75,7 +75,7 @@
   .quick-q:hover { background:var(--orange); color:#000; }
 </style>
 </head>
-<body>
+<body id="app">
 
 <header>
   <div>
@@ -123,6 +123,7 @@
   </div>
   <div class="input-row">
     <textarea id="questionInput" placeholder="Describe what you're seeing... plain language is fine." rows="1"></textarea>
+    <button class="ask-btn" id="micBtn" onclick="toggleVoiceInput()" style="background:var(--panel2);border:2px solid var(--border);color:var(--muted);min-width:52px;" title="Speak your question">🎤</button>
     <label for="photoInput" class="ask-btn" style="display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--panel2);border:2px solid var(--border);color:var(--muted);min-width:52px;" title="Attach a photo for DAVE to analyze">📷</label>
     <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)" />
     <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK DAVE</button>
@@ -419,11 +420,64 @@
     });
   }
 
+  // ── VOICE INPUT ──
+  var recognition = null;
+  var isListening = false;
+
+  window.toggleVoiceInput = function() {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      alert('Voice input not supported in this browser. Use Chrome.');
+      return;
+    }
+    if (isListening) {
+      if (recognition) recognition.stop();
+      return;
+    }
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = 'en-US';
+
+    recognition.onstart = function() {
+      isListening = true;
+      var btn = document.getElementById('micBtn');
+      btn.textContent = '🔴';
+      btn.style.borderColor = 'var(--red)';
+      btn.style.color = 'var(--red)';
+    };
+
+    recognition.onresult = function(event) {
+      var transcript = event.results[0][0].transcript;
+      document.getElementById('questionInput').value = transcript;
+      // Auto submit after voice input
+      setTimeout(function() { askQuestion(); }, 300);
+    };
+
+    recognition.onend = function() {
+      isListening = false;
+      var btn = document.getElementById('micBtn');
+      btn.textContent = '🎤';
+      btn.style.borderColor = 'var(--border)';
+      btn.style.color = 'var(--muted)';
+    };
+
+    recognition.onerror = function() {
+      isListening = false;
+      var btn = document.getElementById('micBtn');
+      btn.textContent = '🎤';
+      btn.style.borderColor = 'var(--border)';
+      btn.style.color = 'var(--muted)';
+    };
+
+    recognition.start();
+  };
+
   // ── DAY/NIGHT MODE ──
   var dayMode = false;
   window.toggleDayNight = function() {
     dayMode = !dayMode;
-    document.body.className = dayMode ? 'day' : '';
+    document.getElementById('app').className = dayMode ? 'day' : '';
     document.getElementById('dayNightBtn').textContent = dayMode ? '🌙' : '☀️';
   };
 
