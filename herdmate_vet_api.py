@@ -202,20 +202,13 @@ async def ask_vet(q: VetQuestion):
     dynamic_system = VET_SYSTEM_PROMPT
 
     if field_context:
-        dynamic_system += f"
-
---- CURRENT FIELD CONTEXT ---
-{field_context}"
+        dynamic_system = dynamic_system + "\n\n--- CURRENT FIELD CONTEXT ---\n" + field_context
 
     if vet_context:
-        dynamic_system += f"
-
---- RELEVANT VETERINARY KNOWLEDGE ---{vet_context}"
+        dynamic_system = dynamic_system + "\n\n--- RELEVANT VETERINARY KNOWLEDGE ---" + vet_context
 
     if memory_context:
-        dynamic_system += f"
-
---- THIS RANCHER'S PAST FIELD CASES ---{memory_context}"
+        dynamic_system = dynamic_system + "\n\n--- PAST FIELD CASES ---" + memory_context
 
     # Build clean conversation messages — just the actual conversation
     claude_messages = []
