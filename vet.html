@@ -123,8 +123,8 @@
   </div>
   <div class="input-row">
     <textarea id="questionInput" placeholder="Describe what you're seeing... plain language is fine." rows="1"></textarea>
-    <button class="ask-btn" id="micBtn" onclick="toggleVoiceInput()" style="background:var(--panel2);border:2px solid var(--border);color:var(--muted);min-width:52px;" title="Speak your question">🎤</button>
-    <label for="photoInput" class="ask-btn" style="display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--panel2);border:2px solid var(--border);color:var(--muted);min-width:52px;" title="Attach a photo for DAVE to analyze">📷</label>
+    <button class="ask-btn" id="micBtn" onclick="toggleVoiceInput()" style="background:var(--orange-dim);border:2px solid var(--orange-muted);color:var(--orange);min-width:52px;font-size:1.2rem;" title="Speak your question">🎤</button>
+    <label for="photoInput" class="ask-btn" style="display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--orange-dim);border:2px solid var(--orange-muted);color:var(--orange);min-width:52px;font-size:1.2rem;" title="Attach a photo for DAVE to analyze">📷</label>
     <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)" />
     <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK DAVE</button>
   </div>
@@ -477,8 +477,14 @@
   var dayMode = false;
   window.toggleDayNight = function() {
     dayMode = !dayMode;
-    document.getElementById('app').className = dayMode ? 'day' : '';
-    document.getElementById('dayNightBtn').textContent = dayMode ? '🌙' : '☀️';
+    var app = document.getElementById('app');
+    if (dayMode) {
+      app.classList.add('day');
+      document.getElementById('dayNightBtn').textContent = '☀️';
+    } else {
+      app.classList.remove('day');
+      document.getElementById('dayNightBtn').textContent = '🌙';
+    }
   };
 
   // Init
