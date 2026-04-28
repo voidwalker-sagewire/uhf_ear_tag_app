@@ -63,13 +63,20 @@ memory_collection = chroma.get_or_create_collection(MEMORY_COLLECTION, embedding
 claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 # ── MODELS ──
+class ConversationMessage(BaseModel):
+    role: str  # "user" or "assistant"
+    content: str
+
 class VetQuestion(BaseModel):
     question: str
     operation: Optional[str] = "HerdMate"
-    tag_epc: Optional[str] = None       # link to specific animal if scanning
-    pasture: Optional[str] = None       # current pasture context
-    weather: Optional[str] = None       # current weather
+    tag_epc: Optional[str] = None
+    pasture: Optional[str] = None
+    weather: Optional[str] = None
     user_id: Optional[str] = "default"
+    conversation_history: Optional[list] = []  # sliding window of last 8 messages
+    image_base64: Optional[str] = None          # base64 encoded image for visual analysis
+    image_type: Optional[str] = "image/jpeg"    # mime type
 
 class VetAnswer(BaseModel):
     answer: str
@@ -197,13 +204,46 @@ Question: {q.question}
 {vet_context}
 {memory_context}"""
 
+    # Build messages with conversation history (sliding window)
+    claude_messages = []
+
+    # Add conversation history (last 8 messages max)
+    if q.conversation_history:
+        for msg in q.conversation_history[-8:]:
+            claude_messages.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
+
+    # Build current user message — with or without image
+    if q.image_base64:
+        # Visual analysis — include the image
+        current_content = [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": q.image_type or "image/jpeg",
+                    "data": q.image_base64
+                }
+            },
+            {
+                "type": "text",
+                "text": user_message
+            }
+        ]
+    else:
+        current_content = user_message
+
+    claude_messages.append({"role": "user", "content": current_content})
+
     # Call Claude
     try:
         response = claude.messages.create(
-            model="claude-haiku-4-5-20251001",  # Fast and cheap for field queries
+            model="claude-haiku-4-5-20251001",
             max_tokens=600,
             system=VET_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}]
+            messages=claude_messages
         )
         answer = response.content[0].text
     except Exception as e:
