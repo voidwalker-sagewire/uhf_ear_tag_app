@@ -125,7 +125,7 @@
     <textarea id="questionInput" placeholder="Describe what you're seeing... plain language is fine." rows="1"></textarea>
     <button class="ask-btn" id="micBtn" onclick="toggleVoiceInput()" style="background:var(--orange-dim);border:2px solid var(--orange-muted);color:var(--orange);min-width:52px;font-size:1.2rem;" title="Speak your question">🎤</button>
     <label for="photoInput" class="ask-btn" style="display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--orange-dim);border:2px solid var(--orange-muted);color:var(--orange);min-width:52px;font-size:1.2rem;" title="Attach a photo for DAVE to analyze">📷</label>
-    <input type="file" id="photoInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhoto(this)" />
+    <input type="file" id="photoInput" accept="image/*" multiple style="display:none;" onchange="handlePhoto(this)" />
     <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK DAVE</button>
   </div>
   <div id="photoPreviewBar" style="display:none;align-items:center;gap:8px;padding:4px 0;">
@@ -187,20 +187,32 @@
   };
 
   window.handlePhoto = function(input) {
-    if (!input.files || !input.files[0]) return;
-    var file = input.files[0];
+    if (!input.files || !input.files.length) return;
+    var files = Array.from(input.files);
+    var previewBar = document.getElementById('photoPreviewBar');
+    var previewImg = document.getElementById('photoPreview');
+
+    // Use first photo as the primary (sent to API)
+    // Show count if multiple
+    var file = files[0];
     var reader = new FileReader();
     reader.onload = function(e) {
       var dataUrl = e.target.result;
-      // Strip the data:image/jpeg;base64, prefix
       pendingPhoto = {
         base64: dataUrl.split(',')[1],
         type: file.type || 'image/jpeg',
-        url: dataUrl
+        url: dataUrl,
+        count: files.length
       };
-      // Show preview
-      document.getElementById('photoPreview').src = dataUrl;
-      document.getElementById('photoPreviewBar').style.display = 'flex';
+      previewImg.src = dataUrl;
+      previewBar.style.display = 'flex';
+      // Update label if multiple photos
+      var label = previewBar.querySelector('span');
+      if (label) {
+        label.textContent = files.length > 1
+          ? '📷 ' + files.length + ' photos attached (first used for analysis)'
+          : '📷 Photo attached';
+      }
     };
     reader.readAsDataURL(file);
   };
