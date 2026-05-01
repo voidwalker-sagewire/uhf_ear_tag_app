@@ -257,7 +257,9 @@
       weather: weather || null,
       tag_epc: tag || null,
       user_id: OPERATION,
-      conversation_history: conversationHistory.slice(0, -1)  // send history BEFORE this message
+      conversation_history: conversationHistory.slice(0, -1),
+      google_access_token: localStorage.getItem('hm_google_token'), // THE MISSING KEY
+      herdmate_sheet_id: localStorage.getItem('hm_sheet_id')        // THE MISSING SHEET ID
     };
 
     // Attach photo if present
