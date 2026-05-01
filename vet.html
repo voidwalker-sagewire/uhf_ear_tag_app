@@ -328,6 +328,27 @@
       div.appendChild(src);
     }
 
+    // Animal context card
+    if (data.animal_context) {
+      var ac = data.animal_context;
+      var cardLines = [];
+      if (ac.sex) cardLines.push(ac.sex);
+      if (ac.breed) cardLines.push(ac.breed);
+      if (ac.color) cardLines.push(ac.color);
+      if (ac.age) cardLines.push(ac.age + ' yrs');
+      if (ac.status) cardLines.push(ac.status);
+      if (ac.weight) cardLines.push(ac.weight + ' lbs');
+      if (ac.due_date && ac.due_date !== 'None' && ac.due_date !== '') cardLines.push('Due: ' + ac.due_date);
+      if (ac.palp_result) cardLines.push('Palp: ' + ac.palp_result);
+      if (ac.bcs) cardLines.push('BCS: ' + ac.bcs);
+
+      var card = document.createElement('div');
+      card.style.cssText = 'background:var(--orange-dim);border:1px solid var(--orange-muted);border-radius:8px;padding:8px 12px;margin-top:6px;font-size:0.78rem;';
+      card.innerHTML = '<div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:1px;color:var(--orange);margin-bottom:4px;font-family:Oswald,sans-serif;">🐄 Tag #' + esc(String(ac.tag || '')) + ' — ' + esc(String(ac.source || '')) + '</div>' +
+        '<div style="color:var(--text);line-height:1.6;">' + cardLines.map(function(l){return esc(l);}).join(' · ') + '</div>';
+      div.appendChild(card);
+    }
+
     // Past cases
     if (data.similar_past_cases && data.similar_past_cases.length > 0) {
       var past = document.createElement('div');
@@ -498,6 +519,17 @@
       document.getElementById('dayNightBtn').textContent = '🌙';
     }
   };
+
+  // Store Google token for DAVE animal lookups
+  // The scanner app sets this when it authenticates
+  function refreshDAVEToken() {
+    var stored = localStorage.getItem('hm_google_token');
+    if (!stored) {
+      // Try to get from cookie or other source
+      // For now just use what scanner.herdmate.ag stored
+    }
+  }
+  refreshDAVEToken();
 
   // Init
   checkStatus();
