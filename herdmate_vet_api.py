@@ -13,23 +13,23 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-try:
-    import chromadb
-    from chromadb.utils import embedding_functions
-    import anthropic
-except ImportError:
-    os.system("pip install fastapi uvicorn chromadb sentence-transformers anthropic --break-system-packages -q")
-    import chromadb
-    from chromadb.utils import embedding_functions
-    import anthropic
+import chromadb
+from chromadb.utils import embedding_functions
+import anthropic
 
 app = FastAPI(title="HerdMate DAVE Vet AI", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://scanner.herdmate.ag", "https://api.herdmate.ag", "http://localhost", "*"],
+    allow_origins=[
+        "https://scanner.herdmate.ag",
+        "https://api.herdmate.ag",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://localhost",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -45,6 +45,23 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # Google Sheet IDs
 DCC_SHEET_ID = "1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI"  # DCC animal records
 HERDMATE_SHEET_ID_KEY = "hm_sheet_id"  # stored per user in request
+
+# ── SIMPLE CACHE ──
+# Cache animal lookups to avoid hammering Google Sheets on every request
+_animal_cache: dict = {}
+CACHE_TTL_SECONDS = 300  # 5 minutes
+
+def get_cached_animal(key: str):
+    import time
+    if key in _animal_cache:
+        record, ts = _animal_cache[key]
+        if time.time() - ts < CACHE_TTL_SECONDS:
+            return record
+    return None
+
+def set_cached_animal(key: str, record):
+    import time
+    _animal_cache[key] = (record, time.time())
 
 # ── CHROMA CLIENT ──
 def get_chroma():
@@ -104,6 +121,12 @@ def find_animal_by_epc(access_token: str, herdmate_sheet_id: str, tag_epc: str):
     if not access_token or not tag_epc:
         return None
 
+    # Check cache first
+    cache_key = f"{tag_epc}_{herdmate_sheet_id}"
+    cached = get_cached_animal(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         # Step 1: HerdMate Animals tab — EPC → Tag #
         animal_tag = None
@@ -137,7 +160,7 @@ def find_animal_by_epc(access_token: str, herdmate_sheet_id: str, tag_epc: str):
                 calf_tag = str(row_dict.get("Calf Tag", "")).strip()
                 uhf = str(row_dict.get("UHF#", "")).strip()
                 if calf_tag == animal_tag or uhf == tag_epc:
-                    return {
+                    result = {
                         "source": "Calf Tracker",
                         "tag": calf_tag,
                         "epc": uhf or tag_epc,
@@ -156,6 +179,8 @@ def find_animal_by_epc(access_token: str, herdmate_sheet_id: str, tag_epc: str):
                         "assisted": row_dict.get("Assisted Y/N", ""),
                         "sire": row_dict.get("Sire", ""),
                     }
+                    set_cached_animal(cache_key, result)
+                    return result
 
         # Step 3: Search Ranch Tracker by Tag #
         ranch_data = sheets_get(access_token, DCC_SHEET_ID, "Ranch Tracker!A:CJ")
@@ -201,6 +226,7 @@ def find_animal_by_epc(access_token: str, herdmate_sheet_id: str, tag_epc: str):
     except Exception as e:
         print(f"Animal lookup error: {e}")
 
+    set_cached_animal(cache_key, None)
     return None
 
 def format_animal_context(animal: dict) -> str:
@@ -428,7 +454,8 @@ async def ask_vet(q: VetQuestion):
             system=dynamic_system,
             messages=claude_messages
         )
-        answer = response.content[0].text
+        text_blocks = [b for b in response.content if b.type == "text"]
+        answer = text_blocks[0].text if text_blocks else "DAVE could not generate a response."
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI response failed: {str(e)}")
 
