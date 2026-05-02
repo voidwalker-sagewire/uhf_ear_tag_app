@@ -9,6 +9,8 @@ import json
 import hashlib
 import requests
 from datetime import datetime
+from google.oauth2.service_account import Credentials
+import google.auth.transport.requests
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -63,6 +65,30 @@ def set_cached_animal(key: str, record):
     import time
     _animal_cache[key] = (record, time.time())
 
+# ── SERVICE ACCOUNT AUTH ──
+CREDENTIALS_FILE = '/root/credentials.json'
+SHEETS_SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly']
+_service_creds = None
+
+def get_service_token():
+    """Get a fresh Google API token using the service account credentials.json.
+    The server authenticates itself — no user token needed ever again."""
+    global _service_creds
+    try:
+        if _service_creds is None:
+            _service_creds = Credentials.from_service_account_file(
+                CREDENTIALS_FILE,
+                scopes=SHEETS_SCOPES
+            )
+        # Refresh if expired
+        if not _service_creds.valid:
+            auth_req = google.auth.transport.requests.Request()
+            _service_creds.refresh(auth_req)
+        return _service_creds.token
+    except Exception as e:
+        print(f"Service account auth error: {e}")
+        return None
+
 # ── CHROMA CLIENT ──
 def get_chroma():
     try:
@@ -92,7 +118,7 @@ class VetQuestion(BaseModel):
     conversation_history: Optional[list] = []
     image_base64: Optional[str] = None
     image_type: Optional[str] = "image/jpeg"
-    google_access_token: Optional[str] = None   # passed from browser for Sheets lookup
+    google_access_token: Optional[str] = None   # deprecated - server uses service account now
     herdmate_sheet_id: Optional[str] = None     # user's HerdMate sheet ID
     google_user_email: Optional[str] = None     # Google email — unique user identifier
 
@@ -115,12 +141,18 @@ def sheets_get(access_token: str, sheet_id: str, range_name: str):
 
 def find_animal_by_epc(access_token: str, herdmate_sheet_id: str, tag_epc: str):
     """
-    Step 1: Look up EPC in HerdMate Animals tab to find visual Tag #
-    Step 2: Look up Tag # in DCC sheet across Calf Tracker and Ranch Tracker
-    Returns a dict with animal context or None
+    Look up animal by EPC using service account credentials.
+    The server authenticates itself — no user token required.
     """
-    if not access_token or not tag_epc:
+    if not tag_epc:
         return None
+
+    # Always use service account token — ignore any browser token
+    token = get_service_token()
+    if not token:
+        print("Service account token unavailable")
+        return None
+    access_token = token
 
     # Check cache first
     cache_key = f"{tag_epc}_{herdmate_sheet_id}"
