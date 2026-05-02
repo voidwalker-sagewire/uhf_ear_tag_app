@@ -94,6 +94,7 @@ class VetQuestion(BaseModel):
     image_type: Optional[str] = "image/jpeg"
     google_access_token: Optional[str] = None   # passed from browser for Sheets lookup
     herdmate_sheet_id: Optional[str] = None     # user's HerdMate sheet ID
+    google_user_email: Optional[str] = None     # Google email — unique user identifier
 
 class VetAnswer(BaseModel):
     answer: str
@@ -314,13 +315,16 @@ def search_memory(question: str, user_id: str, n_results: int = 3):
     try:
         if memory_collection.count() == 0:
             return []
+        # Always filter by user_id so farms never see each other's field history
+        where_filter = {"user_id": {"$eq": user_id}}
         results = memory_collection.query(
             query_texts=[question],
             n_results=min(n_results, memory_collection.count()),
-            where={"user_id": user_id} if user_id != "default" else None
+            where=where_filter
         )
         return list(zip(results.get("documents", [[]])[0], results.get("metadatas", [[]])[0]))
-    except:
+    except Exception as e:
+        print(f"Memory search error: {e}")
         return []
 
 def save_to_memory(question: str, answer: str, metadata: dict):
@@ -380,7 +384,8 @@ async def ask_vet(q: VetQuestion):
 
     # RAG search
     vet_results = search_knowledge(q.question)
-    past_cases = search_memory(q.question, q.user_id)
+    effective_user_id = q.google_user_email or q.user_id or "default"
+    past_cases = search_memory(q.question, effective_user_id)
 
     # Build dynamic system prompt
     dynamic_system = VET_SYSTEM_PROMPT
@@ -464,7 +469,7 @@ async def ask_vet(q: VetQuestion):
         question=q.question,
         answer=answer,
         metadata={
-            "user_id": q.user_id,
+            "user_id": effective_user_id,
             "operation": q.operation or "",
             "pasture": q.pasture or "",
             "tag_epc": q.tag_epc or "",
