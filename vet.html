@@ -89,6 +89,7 @@
       <span style="font-size:0.65rem;color:var(--muted);">Speed</span>
       <input type="range" id="ttsSpeed" min="0.5" max="2.0" step="0.1" value="1.1" style="width:60px;accent-color:var(--orange);" />
     </div>
+    <button class="hdr-btn" onclick="toggleSettings()" title="Settings">⚙️</button>
     <a href="/" class="hdr-btn">← Scanner</a>
   </div>
 </header>
@@ -97,6 +98,29 @@
 
 <div class="disclaimer">
   <strong>⚠️ Field Reference Only</strong> — DAVE is a knowledge assistant, not a licensed veterinarian. Always call your vet for serious conditions. Use this to help you describe symptoms, identify possibilities, and decide urgency.
+</div>
+
+<!-- SETTINGS PANEL -->
+<div id="settingsPanel" style="display:none;background:var(--panel2);border:2px solid var(--orange-muted);border-radius:10px;margin:0 14px 10px;padding:14px;">
+  <div style="font-family:Oswald,sans-serif;font-size:0.9rem;color:var(--orange);margin-bottom:10px;letter-spacing:1px;">⚙️ DAVE SETTINGS</div>
+
+  <div style="margin-bottom:10px;">
+    <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px;">Your Google Sheet ID (for animal lookup)</label>
+    <input id="sheetIdInput" type="text" placeholder="Paste your Google Sheet ID here"
+      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;padding:8px 10px;outline:none;" />
+    <div style="font-size:0.65rem;color:var(--muted);margin-top:3px;">Found in your Google Sheet URL between /d/ and /edit</div>
+  </div>
+
+  <div style="margin-bottom:10px;">
+    <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px;">Operation Name</label>
+    <input id="operationInput" type="text" placeholder="e.g. Dutton Cattle Company"
+      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;padding:8px 10px;outline:none;" />
+  </div>
+
+  <div id="settingsUserInfo" style="font-size:0.72rem;color:var(--muted);margin-bottom:10px;"></div>
+
+  <button onclick="saveSettings()" style="background:var(--orange);border:none;border-radius:8px;color:#000;font-family:Oswald,sans-serif;font-weight:700;padding:10px 20px;cursor:pointer;font-size:0.9rem;">SAVE SETTINGS</button>
+  <button onclick="toggleSettings()" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:Oswald,sans-serif;padding:10px 16px;cursor:pointer;font-size:0.9rem;margin-left:8px;">CANCEL</button>
 </div>
 
 <div class="chat-wrap" id="chatWrap">
@@ -257,9 +281,7 @@
       weather: weather || null,
       tag_epc: tag || null,
       user_id: OPERATION,
-      conversation_history: conversationHistory.slice(0, -1),
-      google_access_token: localStorage.getItem('hm_google_token'), // THE MISSING KEY
-      herdmate_sheet_id: localStorage.getItem('hm_sheet_id')        // THE MISSING SHEET ID
+      conversation_history: conversationHistory.slice(0, -1)  // send history BEFORE this message
     };
 
     // Attach photo if present
@@ -520,6 +542,40 @@
       app.classList.remove('day');
       document.getElementById('dayNightBtn').textContent = '🌙';
     }
+  };
+
+  // ── SETTINGS ──
+  window.toggleSettings = function() {
+    var panel = document.getElementById('settingsPanel');
+    var showing = panel.style.display !== 'none';
+    if (!showing) {
+      // Populate current values
+      document.getElementById('sheetIdInput').value = localStorage.getItem('hm_sheet_id') || '';
+      document.getElementById('operationInput').value = localStorage.getItem('hm_operation') || '';
+      var email = localStorage.getItem('hm_user_email') || '';
+      var info = document.getElementById('settingsUserInfo');
+      if (email) {
+        info.textContent = '✅ Signed in as ' + email;
+        info.style.color = 'var(--green)';
+      } else {
+        info.textContent = '⚠️ Not signed into Google — sign in at the Scanner first';
+        info.style.color = 'var(--orange)';
+      }
+    }
+    panel.style.display = showing ? 'none' : 'block';
+  };
+
+  window.saveSettings = function() {
+    var sheetId = document.getElementById('sheetIdInput').value.trim();
+    var operation = document.getElementById('operationInput').value.trim();
+    if (sheetId) localStorage.setItem('hm_sheet_id', sheetId);
+    if (operation) {
+      localStorage.setItem('hm_operation', operation);
+      OPERATION = operation;
+    }
+    document.getElementById('settingsPanel').style.display = 'none';
+    // Recheck status with new settings
+    checkStatus();
   };
 
   // Store Google token for DAVE animal lookups
