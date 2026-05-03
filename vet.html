@@ -74,7 +74,6 @@
   .quick-q { display:inline-block; background:var(--orange-dim); border:1px solid var(--orange-muted); border-radius:8px; color:var(--orange); font-size:0.78rem; padding:6px 12px; margin:4px; cursor:pointer; }
   .quick-q:hover { background:var(--orange); color:#000; }
 </style>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body id="app">
 
@@ -119,15 +118,6 @@
   </div>
 
   <div id="settingsUserInfo" style="font-size:0.72rem;color:var(--muted);margin-bottom:10px;"></div>
-
-  <div id="daveSignInBtn" style="margin-bottom:12px;display:none;">
-    <button onclick="daveGoogleSignIn()" style="background:#4285f4;border:none;border-radius:8px;color:#fff;font-family:Oswald,sans-serif;font-weight:700;padding:10px 20px;cursor:pointer;font-size:0.9rem;">🔑 Sign In with Google</button>
-    <div style="font-size:0.65rem;color:var(--muted);margin-top:4px;">Sign in to enable animal lookup from your Google Sheet</div>
-  </div>
-
-  <div id="daveSignOutBtn" style="margin-bottom:12px;display:none;">
-    <button onclick="daveGoogleSignOut()" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:Oswald,sans-serif;padding:8px 16px;cursor:pointer;font-size:0.8rem;">Sign Out</button>
-  </div>
 
   <button onclick="saveSettings()" style="background:var(--orange);border:none;border-radius:8px;color:#000;font-family:Oswald,sans-serif;font-weight:700;padding:10px 20px;cursor:pointer;font-size:0.9rem;">SAVE SETTINGS</button>
   <button onclick="toggleSettings()" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:Oswald,sans-serif;padding:10px 16px;cursor:pointer;font-size:0.9rem;margin-left:8px;">CANCEL</button>
@@ -284,14 +274,19 @@
     conversationHistory.push({ role: 'user', content: q });
     if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
 
+    var herdmateSheetId = localStorage.getItem('hm_sheet_id') || null;
+    var googleUserEmail = localStorage.getItem('hm_user_email') || null;
+
     var requestBody = {
       question: q,
       operation: OPERATION,
       pasture: pasture || null,
       weather: weather || null,
       tag_epc: tag || null,
-      user_id: OPERATION,
-      conversation_history: conversationHistory.slice(0, -1)  // send history BEFORE this message
+      user_id: googleUserEmail || OPERATION,
+      conversation_history: conversationHistory.slice(0, -1),
+      herdmate_sheet_id: herdmateSheetId,
+      google_user_email: googleUserEmail
     };
 
     // Attach photo if present
@@ -553,85 +548,6 @@
       document.getElementById('dayNightBtn').textContent = '🌙';
     }
   };
-
-  // ── DAVE GOOGLE AUTH ──
-  var DAVE_CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
-  var DAVE_SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
-  var daveTokenClient = null;
-
-  function initDAVEAuth() {
-    if (!window.google) return;
-    daveTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: DAVE_CLIENT_ID,
-      scope: DAVE_SCOPES,
-      callback: function(response) {
-        if (response.error) {
-          alert('Sign in failed: ' + response.error);
-          return;
-        }
-        // Save token
-        localStorage.setItem('hm_google_token', response.access_token);
-        // Get email
-        fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: {Authorization: 'Bearer ' + response.access_token}
-        }).then(function(r) { return r.json(); }).then(function(info) {
-          if (info.email) {
-            localStorage.setItem('hm_user_email', info.email);
-          }
-          // Refresh settings display
-          updateSettingsDisplay();
-        });
-      }
-    });
-  }
-
-  window.daveGoogleSignIn = function() {
-    if (!daveTokenClient) {
-      alert('Google auth not loaded yet. Try again in a moment.');
-      return;
-    }
-    daveTokenClient.requestAccessToken({prompt: ''});
-  };
-
-  window.daveGoogleSignOut = function() {
-    var token = localStorage.getItem('hm_google_token');
-    if (token && window.google) {
-      google.accounts.oauth2.revoke(token, function() {});
-    }
-    localStorage.removeItem('hm_google_token');
-    localStorage.removeItem('hm_user_email');
-    updateSettingsDisplay();
-  };
-
-  function updateSettingsDisplay() {
-    var email = localStorage.getItem('hm_user_email') || '';
-    var token = localStorage.getItem('hm_google_token') || '';
-    var info = document.getElementById('settingsUserInfo');
-    var signInBtn = document.getElementById('daveSignInBtn');
-    var signOutBtn = document.getElementById('daveSignOutBtn');
-    if (!info) return;
-    if (email && token) {
-      info.textContent = '✅ Signed in as ' + email;
-      info.style.color = 'var(--green)';
-      if (signInBtn) signInBtn.style.display = 'none';
-      if (signOutBtn) signOutBtn.style.display = 'block';
-    } else {
-      info.textContent = '⚠️ Not signed into Google';
-      info.style.color = 'var(--orange)';
-      if (signInBtn) signInBtn.style.display = 'block';
-      if (signOutBtn) signOutBtn.style.display = 'none';
-    }
-  }
-
-  // Initialize auth when Google loads
-  window.addEventListener('load', function() {
-    var checkGoogle = setInterval(function() {
-      if (window.google && window.google.accounts) {
-        clearInterval(checkGoogle);
-        initDAVEAuth();
-      }
-    }, 200);
-  });
 
   // ── SETTINGS ──
   window.toggleSettings = function() {
