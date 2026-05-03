@@ -1,602 +1,460 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<meta name="mobile-web-app-capable" content="yes">
-<title>DAVE — HerdMate Field Vet</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
+#!/usr/bin/env python3
+"""
+HerdMate DAVE Vet AI — FastAPI Backend v3
+Uses Google Service Account for permanent server-side auth.
+No OAuth tokens. No browser dependency. Works forever.
+"""
 
-  :root {
-    --bg:#0a0a0a; --panel:#141414; --panel2:#1c1c1c; --border:#2a2a2a;
-    --orange:#e86a1a; --orange-dim:#2a1500; --orange-muted:#7a3a0a;
-    --text:#f0f0f0; --muted:#888; --red:#e04040; --red-dim:#3d1010;
-    --green:#4caf50; --green-dim:#1a3d1a; --blue:#4a9eff; --blue-dim:#0a1a2a;
-  }
-  * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
-  body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; }
+import os
+import json
+import hashlib
+import requests as http_requests
+from datetime import datetime
+from typing import Optional
 
-  header { background:var(--bg); border-bottom:3px solid var(--orange); padding:10px 14px; display:flex; align-items:center; gap:10px; position:sticky; top:0; z-index:100; }
-  .logo { font-family:'Oswald',sans-serif; font-size:1.5rem; font-weight:700; color:var(--orange); }
-  .logo-sub { font-size:0.6rem; letter-spacing:2px; color:var(--muted); text-transform:uppercase; margin-top:2px; }
-  .hdr-right { margin-left:auto; display:flex; align-items:center; gap:6px; }
-  .hdr-btn { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:0.75rem; color:var(--muted); cursor:pointer; text-decoration:none; font-family:'Source Sans 3',sans-serif; display:flex; align-items:center; min-height:36px; }
-  .hdr-btn:hover { border-color:var(--orange); color:var(--orange); }
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
-  .status-bar { padding:7px 14px; display:flex; align-items:center; gap:8px; font-size:0.75rem; font-weight:600; }
-  .status-bar.ok { background:var(--green-dim); border-bottom:1px solid var(--green); color:var(--green); }
-  .status-bar.warn { background:var(--orange-dim); border-bottom:1px solid var(--orange); color:var(--orange); }
-  .status-bar.err { background:var(--red-dim); border-bottom:1px solid var(--red); color:var(--red); }
+import chromadb
+from chromadb.utils import embedding_functions
+import anthropic
+from google.oauth2.service_account import Credentials
+import google.auth.transport.requests
 
-  /* CHAT */
-  .chat-wrap { flex:1; overflow-y:auto; padding:14px 14px 140px; display:flex; flex-direction:column; gap:14px; }
+app = FastAPI(title="HerdMate DAVE Vet AI", version="3.0.0")
 
-  .msg { display:flex; flex-direction:column; gap:6px; }
-  .msg.user { align-items:flex-end; }
-  .msg.assistant { align-items:flex-start; }
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://scanner.herdmate.ag",
+        "https://api.herdmate.ag",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://localhost",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-  .bubble { max-width:85%; padding:12px 16px; border-radius:14px; line-height:1.6; font-size:0.88rem; }
-  .msg.user .bubble { background:var(--orange); color:#000; border-radius:14px 14px 4px 14px; font-weight:600; }
-  .msg.assistant .bubble { background:var(--panel); border:1px solid var(--border); border-radius:14px 14px 14px 4px; color:var(--text); }
+# ── CONFIG ──
+CHROMA_HOST = "localhost"
+CHROMA_PORT = 8000
+VET_COLLECTION = "herdmate_vet_knowledge"
+MEMORY_COLLECTION = "herdmate_vet_memory"
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CREDENTIALS_FILE = "/root/credentials.json"
+SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
-  .sources { font-size:0.68rem; color:var(--muted); padding:4px 8px; }
-  .sources span { background:var(--panel2); border:1px solid var(--border); border-radius:4px; padding:2px 6px; margin-right:4px; display:inline-block; margin-top:2px; }
+# ── SERVICE ACCOUNT AUTH ──
+_service_creds = None
 
-  .past-case { font-size:0.72rem; color:var(--blue); background:var(--blue-dim); border:1px solid #1a3a5a; border-radius:6px; padding:6px 10px; margin-top:4px; }
-  .past-case-label { font-size:0.6rem; text-transform:uppercase; letter-spacing:1px; color:var(--blue); margin-bottom:2px; font-family:'Oswald',sans-serif; }
+def get_service_token():
+    global _service_creds
+    try:
+        if _service_creds is None:
+            _service_creds = Credentials.from_service_account_file(
+                CREDENTIALS_FILE, scopes=SHEETS_SCOPES
+            )
+        if not _service_creds.valid:
+            auth_req = google.auth.transport.requests.Request()
+            _service_creds.refresh(auth_req)
+        return _service_creds.token
+    except Exception as e:
+        print(f"Service account auth error: {e}")
+        return None
 
-  .disclaimer { font-size:0.72rem; color:var(--muted); background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:10px 14px; margin:0 14px 10px; line-height:1.6; }
-  .disclaimer strong { color:var(--orange); }
+# ── SIMPLE CACHE ──
+_animal_cache: dict = {}
+CACHE_TTL_SECONDS = 300
 
-  /* INPUT BAR */
-  .input-bar { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:2px solid var(--orange); padding:10px 14px; display:flex; flex-direction:column; gap:8px; z-index:50; }
-  .context-row { display:flex; gap:6px; flex-wrap:wrap; }
-  .ctx-input { background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:0.72rem; padding:4px 8px; outline:none; flex:1; min-width:80px; min-height:30px; }
-  .ctx-input::placeholder { color:var(--muted); font-size:0.68rem; }
-  .ctx-input:focus { border-color:var(--orange); }
-  .input-row { display:flex; gap:8px; }
-  #questionInput { flex:1; background:var(--bg); border:2px solid var(--orange); border-radius:10px; color:var(--text); font-family:'Source Sans 3',sans-serif; font-size:0.95rem; padding:12px 14px; outline:none; resize:none; min-height:52px; max-height:120px; line-height:1.5; }
-  #questionInput::placeholder { color:var(--muted); font-size:0.85rem; }
-  .ask-btn { background:var(--orange); border:none; border-radius:10px; color:#000; font-family:'Oswald',sans-serif; font-size:1rem; font-weight:700; padding:12px 18px; cursor:pointer; min-height:52px; min-width:72px; transition:background .15s; }
-  .ask-btn:disabled { opacity:0.4; cursor:not-allowed; }
+def get_cached_animal(key: str):
+    import time
+    if key in _animal_cache:
+        record, ts = _animal_cache[key]
+        if time.time() - ts < CACHE_TTL_SECONDS:
+            return record
+    return "MISS"
 
-  .typing { display:flex; gap:4px; align-items:center; padding:14px 16px; }
-  .typing span { width:8px; height:8px; border-radius:50%; background:var(--muted); animation:typing 1.2s infinite; }
-  .typing span:nth-child(2) { animation-delay:0.2s; }
-  .typing span:nth-child(3) { animation-delay:0.4s; }
-  @keyframes typing { 0%,100%{opacity:0.3;transform:scale(0.8)} 50%{opacity:1;transform:scale(1)} }
+def set_cached_animal(key: str, record):
+    import time
+    _animal_cache[key] = (record, time.time())
 
-  .empty-state { text-align:center; padding:40px 20px; color:var(--muted); }
-  .empty-icon { font-size:3rem; margin-bottom:12px; opacity:0.5; }
-  .empty-title { font-family:'Oswald',sans-serif; font-size:1.1rem; color:var(--orange); margin-bottom:8px; }
-  .empty-desc { font-size:0.82rem; line-height:1.7; max-width:280px; margin:0 auto; }
-  .quick-q { display:inline-block; background:var(--orange-dim); border:1px solid var(--orange-muted); border-radius:8px; color:var(--orange); font-size:0.78rem; padding:6px 12px; margin:4px; cursor:pointer; }
-  .quick-q:hover { background:var(--orange); color:#000; }
-</style>
-</head>
-<body id="app">
+# ── CHROMA CLIENT ──
+def get_chroma():
+    try:
+        client = chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+        client.heartbeat()
+        return client
+    except:
+        return chromadb.PersistentClient(path="./herdmate_vet_db")
 
-<header>
-  <div>
-    <div class="logo">🐄 DAVE VET by HerdMate</div>
-    <div class="logo-sub">Don't Always Visit the Emergency vet</div>
-  </div>
-  <div class="hdr-right">
-    <button class="mode-btn" id="dayNightBtn" onclick="toggleDayNight()" title="Toggle day/night mode">🌙</button>
-    <button class="hdr-btn" id="ttsToggle" onclick="toggleTTS()" title="DAVE speaks answers aloud">🔇 DAVE</button>
-    <div id="speedWrap" style="display:none;align-items:center;gap:4px;">
-      <span style="font-size:0.65rem;color:var(--muted);">Speed</span>
-      <input type="range" id="ttsSpeed" min="0.5" max="2.0" step="0.1" value="1.1" style="width:60px;accent-color:var(--orange);" />
-    </div>
-    <button class="hdr-btn" onclick="toggleSettings()" title="Settings">⚙️</button>
-    <a href="/" class="hdr-btn">← Scanner</a>
-  </div>
-</header>
+ef = embedding_functions.SentenceTransformerEmbeddingFunction(
+    model_name="all-MiniLM-L6-v2"
+)
 
-<div class="status-bar warn" id="statusBar">⏳ Waking up DAVE...</div>
+chroma = get_chroma()
+vet_collection = chroma.get_or_create_collection(VET_COLLECTION, embedding_function=ef)
+memory_collection = chroma.get_or_create_collection(MEMORY_COLLECTION, embedding_function=ef)
+claude = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
-<div class="disclaimer">
-  <strong>⚠️ Field Reference Only</strong> — DAVE is a knowledge assistant, not a licensed veterinarian. Always call your vet for serious conditions. Use this to help you describe symptoms, identify possibilities, and decide urgency.
-</div>
+# ── MODELS ──
+class VetQuestion(BaseModel):
+    question: str
+    operation: Optional[str] = "HerdMate"
+    tag_epc: Optional[str] = None
+    pasture: Optional[str] = None
+    weather: Optional[str] = None
+    user_id: Optional[str] = "default"
+    conversation_history: list = Field(default_factory=list)
+    image_base64: Optional[str] = None
+    image_type: Optional[str] = "image/jpeg"
+    google_access_token: Optional[str] = None   # deprecated - server uses service account
+    herdmate_sheet_id: Optional[str] = None
+    google_user_email: Optional[str] = None
 
-<!-- SETTINGS PANEL -->
-<div id="settingsPanel" style="display:none;background:var(--panel2);border:2px solid var(--orange-muted);border-radius:10px;margin:0 14px 10px;padding:14px;">
-  <div style="font-family:Oswald,sans-serif;font-size:0.9rem;color:var(--orange);margin-bottom:10px;letter-spacing:1px;">⚙️ DAVE SETTINGS</div>
+class VetAnswer(BaseModel):
+    answer: str
+    sources: list
+    similar_past_cases: list
+    confidence: str
+    timestamp: str
+    animal_context: Optional[dict] = None
 
-  <div style="margin-bottom:10px;">
-    <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px;">Your Google Sheet ID (for animal lookup)</label>
-    <input id="sheetIdInput" type="text" placeholder="Paste your Google Sheet ID here"
-      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;padding:8px 10px;outline:none;" />
-    <div style="font-size:0.65rem;color:var(--muted);margin-top:3px;">Found in your Google Sheet URL between /d/ and /edit</div>
-  </div>
+# ── GOOGLE SHEETS LOOKUP ──
+def sheets_get(token: str, sheet_id: str, range_name: str):
+    url = f"https://sheets.googleapis.com/v4/spreadsheets/{sheet_id}/values/{range_name}"
+    try:
+        resp = http_requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10
+        )
+        if resp.ok:
+            return resp.json().get("values", [])
+        else:
+            print(f"Sheets error {resp.status_code}: {resp.text[:200]}")
+            return []
+    except Exception as e:
+        print(f"Sheets request error: {e}")
+        return []
 
-  <div style="margin-bottom:10px;">
-    <label style="font-size:0.72rem;color:var(--muted);display:block;margin-bottom:4px;">Operation Name</label>
-    <input id="operationInput" type="text" placeholder="e.g. Dutton Cattle Company"
-      style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:0.8rem;padding:8px 10px;outline:none;" />
-  </div>
+def find_animal(sheet_id: str, tag_identifier: str):
+    """
+    Look up an animal by tag number or UHF EPC.
+    Searches Calf Tracker first, then Ranch Tracker.
+    tag_identifier can be a visual tag number (3476) or UHF EPC.
+    """
+    if not tag_identifier or not sheet_id:
+        return None
 
-  <div id="settingsUserInfo" style="font-size:0.72rem;color:var(--muted);margin-bottom:10px;"></div>
+    cache_key = f"{sheet_id}_{tag_identifier}"
+    cached = get_cached_animal(cache_key)
+    if cached != "MISS":
+        return cached
 
-  <button onclick="saveSettings()" style="background:var(--orange);border:none;border-radius:8px;color:#000;font-family:Oswald,sans-serif;font-weight:700;padding:10px 20px;cursor:pointer;font-size:0.9rem;">SAVE SETTINGS</button>
-  <button onclick="toggleSettings()" style="background:var(--panel);border:1px solid var(--border);border-radius:8px;color:var(--muted);font-family:Oswald,sans-serif;padding:10px 16px;cursor:pointer;font-size:0.9rem;margin-left:8px;">CANCEL</button>
-</div>
+    token = get_service_token()
+    if not token:
+        return None
 
-<div class="chat-wrap" id="chatWrap">
-  <div class="empty-state" id="emptyState">
-    <div class="empty-icon">🏥</div>
-    <div class="empty-title">Hey. I'm DAVE. What's going on with your animal?</div>
-    <div class="empty-desc">Describe what you're seeing. Plain language. I'll tell you what it might be and what to do right now.</div>
-    <div style="margin-top:16px;">
-      <div class="quick-q" onclick="quickAsk('Calf born weak, won\\'t stand, breathing shallow. What do I do?')">Weak newborn calf</div>
-      <div class="quick-q" onclick="quickAsk('Cow is off feed and standing away from the herd. What should I check?')">Off feed, isolated</div>
-      <div class="quick-q" onclick="quickAsk('Calf has scours, yellow watery diarrhea, about 3 days old')">Calf scours</div>
-      <div class="quick-q" onclick="quickAsk('Cow looks like she\\'s been in labor a long time with no calf. When should I assist?')">Difficult calving</div>
-      <div class="quick-q" onclick="quickAsk('Animal is limping on front left leg, what are the common causes in cattle?')">Limping</div>
-      <div class="quick-q" onclick="quickAsk('What are signs of pinkeye in cattle and how do I treat it?')">Pinkeye</div>
-    </div>
-  </div>
-</div>
+    tag = str(tag_identifier).strip()
 
-<div class="input-bar">
-  <div class="context-row">
-    <input class="ctx-input" id="ctxPasture" placeholder="📍 Pasture (optional)" />
-    <input class="ctx-input" id="ctxWeather" placeholder="🌤 Weather (optional)" />
-    <input class="ctx-input" id="ctxTag" placeholder="🏷 Tag EPC (optional)" />
-  </div>
-  <div class="input-row">
-    <textarea id="questionInput" placeholder="Describe what you're seeing... plain language is fine." rows="1"></textarea>
-    <button class="ask-btn" id="micBtn" onclick="toggleVoiceInput()" style="background:var(--orange-dim);border:2px solid var(--orange-muted);color:var(--orange);min-width:52px;font-size:1.2rem;" title="Speak your question">🎤</button>
-    <label for="photoInput" class="ask-btn" style="display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--orange-dim);border:2px solid var(--orange-muted);color:var(--orange);min-width:52px;font-size:1.2rem;" title="Attach a photo for DAVE to analyze">📷</label>
-    <input type="file" id="photoInput" accept="image/*" multiple style="display:none;" onchange="handlePhoto(this)" />
-    <button class="ask-btn" id="askBtn" onclick="askQuestion()">ASK DAVE</button>
-  </div>
-  <div id="photoPreviewBar" style="display:none;align-items:center;gap:8px;padding:4px 0;">
-    <img id="photoPreview" style="height:40px;border-radius:6px;border:1px solid var(--orange);" />
-    <span style="font-size:0.72rem;color:var(--orange);">📷 Photo attached</span>
-    <button onclick="clearPhoto()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:0.9rem;">✕</button>
-  </div>
-</div>
+    # ── SEARCH CALF TRACKER ──
+    try:
+        calf_data = sheets_get(token, sheet_id, "Calf Tracker!A:AF")
+        if calf_data and len(calf_data) > 1:
+            headers = calf_data[0]
+            for row in calf_data[1:]:
+                if not row:
+                    continue
+                row_dict = dict(zip(headers, row + [""] * max(0, len(headers) - len(row))))
+                calf_tag = str(row_dict.get("Calf Tag", "")).strip()
+                uhf = str(row_dict.get("UHF#", "")).strip()
+                if calf_tag == tag or (uhf and uhf == tag):
+                    result = {
+                        "source": "Calf Tracker",
+                        "tag": calf_tag,
+                        "uhf": uhf,
+                        "date": str(row_dict.get("Date", ""))[:10],
+                        "color": row_dict.get("Calf Color", ""),
+                        "sex": row_dict.get("Calf Sex", ""),
+                        "type": row_dict.get("Calf Type", ""),
+                        "birth_weight": row_dict.get("Birth Weight", ""),
+                        "dam_tag": row_dict.get("Cow Tag", ""),
+                        "season": row_dict.get("Calving Season", ""),
+                        "status": row_dict.get("Status", ""),
+                        "assisted": row_dict.get("Assisted Y/N", ""),
+                        "is_twin": row_dict.get("Is Twin", ""),
+                        "dam_bcs": row_dict.get("Dam BCS", ""),
+                        "udder": row_dict.get("Udder Condition", ""),
+                        "notes": row_dict.get("Calving Notes", ""),
+                        "gps": row_dict.get("User Location", ""),
+                        "tagger": row_dict.get("Created By", ""),
+                    }
+                    set_cached_animal(cache_key, result)
+                    return result
+    except Exception as e:
+        print(f"Calf Tracker search error: {e}")
 
-<script>
-(function() {
-  // ── CONFIG ──
-  // Update this to your DigitalOcean server URL when deployed
-  var API_BASE = 'https://api.herdmate.ag';
-  var OPERATION = localStorage.getItem('hm_operation') || 'HerdMate';
+    # ── SEARCH RANCH TRACKER ──
+    try:
+        ranch_data = sheets_get(token, sheet_id, "Ranch Tracker!A:BZ")
+        if ranch_data and len(ranch_data) > 1:
+            headers = ranch_data[0]
+            for row in ranch_data[1:]:
+                if not row:
+                    continue
+                row_dict = dict(zip(headers, row + [""] * max(0, len(headers) - len(row))))
+                tag_num = str(row_dict.get("Tag #", "")).strip()
+                uhf = str(row_dict.get("UHF#", "")).strip()
+                if tag_num == tag or (uhf and uhf == tag):
+                    result = {
+                        "source": "Ranch Tracker",
+                        "tag": tag_num,
+                        "uhf": uhf,
+                        "display_id": row_dict.get("DisplayID", ""),
+                        "sex": row_dict.get("Sex", ""),
+                        "breed": row_dict.get("Breed", ""),
+                        "type": row_dict.get("Type", ""),
+                        "color": row_dict.get("Color", ""),
+                        "birth_date": str(row_dict.get("Birth Date", ""))[:10],
+                        "age": row_dict.get("Age", ""),
+                        "pasture": row_dict.get("Pasture", ""),
+                        "status": row_dict.get("Status", ""),
+                        "weight": row_dict.get("Weight", ""),
+                        "dam": row_dict.get("Dam #", ""),
+                        "sire": row_dict.get("Sire #", ""),
+                        "due_date": str(row_dict.get("Due Date", ""))[:10],
+                        "palp_result": row_dict.get("Palp. Result", ""),
+                        "months_preg": row_dict.get("Mth. Preg.", ""),
+                        "bcs": row_dict.get("BCS", ""),
+                        "disposition": row_dict.get("Disposition", ""),
+                        "notes": row_dict.get("Notes", ""),
+                    }
+                    set_cached_animal(cache_key, result)
+                    return result
+    except Exception as e:
+        print(f"Ranch Tracker search error: {e}")
 
-  var conversationHistory = [];  // sliding window — last 8 exchanges
-  var MAX_HISTORY = 8;
-  var isLoading = false;
-  var pendingPhoto = null;  // base64 encoded photo
+    set_cached_animal(cache_key, None)
+    return None
 
-  // Check API status on load
-  function checkStatus() {
-    fetch(API_BASE + '/vet/status')
-      .then(function(r) { return r.json(); })
-      .then(function(data) {
-        var bar = document.getElementById('statusBar');
-        if (data.vet_knowledge_docs > 0) {
-          bar.textContent = '✅ DAVE is ready — ' + data.vet_knowledge_docs + ' veterinary references loaded';
-          bar.className = 'status-bar ok';
-        } else {
-          bar.textContent = '⚠️ DAVE has no knowledge yet — run ingestion script on server';
-          bar.className = 'status-bar warn';
+def format_animal_context(animal: dict) -> str:
+    if not animal:
+        return ""
+    lines = [f"--- ANIMAL RECORD ({animal.get('source', 'HerdMate')}) ---"]
+    lines.append(f"Tag #: {animal.get('tag', 'Unknown')}")
+    if animal.get('uhf'): lines.append(f"UHF EPC: {animal['uhf']}")
+    if animal.get('sex'): lines.append(f"Sex: {animal['sex']}")
+    if animal.get('breed'): lines.append(f"Breed: {animal['breed']}")
+    if animal.get('color'): lines.append(f"Color: {animal['color']}")
+    if animal.get('type'): lines.append(f"Type: {animal['type']}")
+    if animal.get('date'): lines.append(f"Born: {animal['date']}")
+    if animal.get('birth_date'): lines.append(f"Born: {animal['birth_date']}")
+    if animal.get('age'): lines.append(f"Age: {animal['age']} years")
+    if animal.get('season'): lines.append(f"Season: {animal['season']}")
+    if animal.get('status'): lines.append(f"Status: {animal['status']}")
+    if animal.get('birth_weight'): lines.append(f"Birth Weight: {animal['birth_weight']} lbs")
+    if animal.get('weight'): lines.append(f"Current Weight: {animal['weight']} lbs")
+    if animal.get('dam_tag') or animal.get('dam'): lines.append(f"Dam Tag: {animal.get('dam_tag') or animal.get('dam')}")
+    if animal.get('sire'): lines.append(f"Sire Tag: {animal['sire']}")
+    if animal.get('due_date') and str(animal['due_date']) not in ['', 'None', '1900-01-00']: lines.append(f"Due Date: {animal['due_date']}")
+    if animal.get('palp_result'): lines.append(f"Palpation: {animal['palp_result']}")
+    if animal.get('months_preg'): lines.append(f"Months Pregnant: {animal['months_preg']}")
+    if animal.get('bcs'): lines.append(f"BCS: {animal['bcs']}")
+    if animal.get('dam_bcs'): lines.append(f"Dam BCS at birth: {animal['dam_bcs']}")
+    if animal.get('udder'): lines.append(f"Dam Udder: {animal['udder']}")
+    if animal.get('assisted') and str(animal['assisted']).lower() in ['yes', 'y', 'true']: lines.append(f"Assisted Birth: Yes")
+    if animal.get('is_twin') and str(animal['is_twin']).lower() in ['yes', 'y', 'true', '1']: lines.append(f"Twin: Yes")
+    if animal.get('pasture'): lines.append(f"Pasture: {animal['pasture']}")
+    if animal.get('disposition'): lines.append(f"Disposition: {animal['disposition']}")
+    if animal.get('notes') and str(animal['notes']) not in ['', 'None']: lines.append(f"Notes: {animal['notes']}")
+    return "\n".join(lines)
+
+# ── RAG ──
+def search_knowledge(question: str, n_results: int = 5):
+    try:
+        results = vet_collection.query(
+            query_texts=[question],
+            n_results=min(n_results, vet_collection.count() or 1)
+        )
+        return list(zip(results.get("documents", [[]])[0], results.get("metadatas", [[]])[0]))
+    except Exception as e:
+        print(f"Knowledge search error: {e}")
+        return []
+
+def search_memory(question: str, user_id: str, n_results: int = 3):
+    try:
+        if memory_collection.count() == 0:
+            return []
+        where_filter = {"user_id": {"$eq": user_id}}
+        results = memory_collection.query(
+            query_texts=[question],
+            n_results=min(n_results, memory_collection.count()),
+            where=where_filter
+        )
+        return list(zip(results.get("documents", [[]])[0], results.get("metadatas", [[]])[0]))
+    except Exception as e:
+        print(f"Memory search error: {e}")
+        return []
+
+def save_to_memory(question: str, answer: str, metadata: dict):
+    try:
+        doc_id = hashlib.md5(f"{question}_{datetime.now().isoformat()}".encode()).hexdigest()
+        memory_collection.add(
+            ids=[doc_id],
+            documents=[f"Q: {question}\nA: {answer}"],
+            metadatas=[{**metadata, "timestamp": datetime.now().isoformat(), "type": "field_case"}]
+        )
+    except Exception as e:
+        print(f"Memory save error: {e}")
+
+# ── SYSTEM PROMPT ──
+VET_SYSTEM_PROMPT = """You are DAVE — Don't Always Visit the Emergency Vet.
+You are a cattle health assistant built for working ranchers in the field by HerdMate.
+
+You are NOT a replacement for a veterinarian. You are a knowledgeable field reference.
+
+Your style:
+- Plain language. Direct. Get to the point fast.
+- Practical. What do I do RIGHT NOW.
+- Honest about uncertainty.
+
+Only recommend calling a vet when it genuinely warrants it:
+- EMERGENCY (say it first, loud): not breathing, severe bleeding, prolapse, broken bones, downer cow that can't rise, bloat with distress, difficult calving over 2 hours
+- URGENT (mention once at end): fever over 104, eye cloudiness or corneal ulcer, calf not nursing after 6 hours, signs of BRD
+- MONITOR (no vet mention needed): mild lameness, early scours with alert calf, minor wounds, routine questions
+
+The disclaimer at the top of the app already covers liability. Do not repeat it in every response.
+If you do recommend a vet call, say it once clearly and move on.
+
+When you have an animal record, use it. Reference specific details — tag number, age, dam, birth weight.
+Make your answers personal to that specific animal.
+
+You have access to:
+1. Veterinary knowledge base — MSD Veterinary Manual and beef cattle extension publications
+2. The rancher's personal field history — past cases and outcomes
+3. Animal records from HerdMate Google Sheet when a tag is provided"""
+
+# ── MAIN ENDPOINT ──
+@app.post("/vet/ask", response_model=VetAnswer)
+async def ask_vet(q: VetQuestion):
+    if not q.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    effective_user_id = q.google_user_email or q.user_id or "default"
+
+    # Look up animal if tag provided
+    animal_record = None
+    animal_context = ""
+    if q.tag_epc and q.herdmate_sheet_id:
+        animal_record = find_animal(q.herdmate_sheet_id, q.tag_epc)
+        if animal_record:
+            animal_context = format_animal_context(animal_record)
+
+    # RAG search
+    vet_results = search_knowledge(q.question)
+    past_cases = search_memory(q.question, effective_user_id)
+
+    # Build dynamic system prompt
+    dynamic_system = VET_SYSTEM_PROMPT
+
+    if animal_context:
+        dynamic_system += "\n\n" + animal_context
+
+    ctx_parts = []
+    if q.operation: ctx_parts.append(f"Operation: {q.operation}")
+    if q.pasture: ctx_parts.append(f"Pasture: {q.pasture}")
+    if q.weather: ctx_parts.append(f"Weather: {q.weather}")
+    if q.tag_epc and not animal_record: ctx_parts.append(f"Scanned tag: {q.tag_epc} (no record found)")
+    if ctx_parts:
+        dynamic_system += "\n\n--- FIELD CONTEXT ---\n" + "\n".join(ctx_parts)
+
+    sources = []
+    if vet_results:
+        vet_ctx = "\n\n--- VETERINARY KNOWLEDGE ---"
+        for doc, meta in vet_results:
+            source = meta.get("source", "veterinary reference")
+            vet_ctx += f"\n[{source}]\n{doc}\n"
+            if source not in sources:
+                sources.append(source)
+        dynamic_system += vet_ctx
+
+    past_case_summaries = []
+    if past_cases:
+        mem_ctx = "\n\n--- YOUR PAST FIELD CASES ---"
+        for doc, meta in past_cases:
+            ts = meta.get("timestamp", "")[:10]
+            mem_ctx += f"\n[{ts}] {doc}\n"
+            past_case_summaries.append(f"{ts}: {doc[:100]}...")
+        dynamic_system += mem_ctx
+
+    # Build conversation
+    claude_messages = []
+    for msg in q.conversation_history[-8:]:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if content:
+            claude_messages.append({"role": role, "content": content})
+
+    if q.image_base64:
+        current_content = [
+            {"type": "image", "source": {"type": "base64", "media_type": q.image_type or "image/jpeg", "data": q.image_base64}},
+            {"type": "text", "text": q.question}
+        ]
+    else:
+        current_content = q.question
+
+    claude_messages.append({"role": "user", "content": current_content})
+
+    try:
+        response = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=700,
+            system=dynamic_system,
+            messages=claude_messages
+        )
+        text_blocks = [b for b in response.content if b.type == "text"]
+        answer = text_blocks[0].text if text_blocks else "DAVE could not generate a response."
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI response failed: {str(e)}")
+
+    save_to_memory(
+        question=q.question,
+        answer=answer,
+        metadata={
+            "user_id": effective_user_id,
+            "operation": q.operation or "",
+            "pasture": q.pasture or "",
+            "tag_epc": q.tag_epc or "",
+            "weather": q.weather or ""
         }
-      })
-      .catch(function() {
-        var bar = document.getElementById('statusBar');
-        bar.textContent = '❌ DAVE is offline — check server connection';
-        bar.className = 'status-bar err';
-      });
-  }
+    )
 
-  // Auto-resize textarea
-  var ta = document.getElementById('questionInput');
-  ta.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-  });
-  ta.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      askQuestion();
-    }
-  });
+    return VetAnswer(
+        answer=answer,
+        sources=sources[:3],
+        similar_past_cases=past_case_summaries[:2],
+        confidence="high" if vet_results else "low",
+        timestamp=datetime.now().isoformat(),
+        animal_context=animal_record
+    )
 
-  window.quickAsk = function(q) {
-    document.getElementById('questionInput').value = q;
-    askQuestion();
-  };
-
-  window.handlePhoto = function(input) {
-    if (!input.files || !input.files.length) return;
-    var files = Array.from(input.files);
-    var previewBar = document.getElementById('photoPreviewBar');
-    var previewImg = document.getElementById('photoPreview');
-
-    // Use first photo as the primary (sent to API)
-    // Show count if multiple
-    var file = files[0];
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      var dataUrl = e.target.result;
-      pendingPhoto = {
-        base64: dataUrl.split(',')[1],
-        type: file.type || 'image/jpeg',
-        url: dataUrl,
-        count: files.length
-      };
-      previewImg.src = dataUrl;
-      previewBar.style.display = 'flex';
-      // Update label if multiple photos
-      var label = previewBar.querySelector('span');
-      if (label) {
-        label.textContent = files.length > 1
-          ? '📷 ' + files.length + ' photos attached (first used for analysis)'
-          : '📷 Photo attached';
-      }
-    };
-    reader.readAsDataURL(file);
-  };
-
-  window.clearPhoto = function() {
-    pendingPhoto = null;
-    document.getElementById('photoInput').value = '';
-    document.getElementById('photoPreviewBar').style.display = 'none';
-  };
-
-  window.askQuestion = function() {
-    if (isLoading) return;
-    var q = document.getElementById('questionInput').value.trim();
-    if (!q) return;
-
-    // Hide empty state
-    document.getElementById('emptyState').style.display = 'none';
-
-    // Add user message
-    addMessage('user', q);
-    document.getElementById('questionInput').value = '';
-    document.getElementById('questionInput').style.height = 'auto';
-
-    // Show typing indicator
-    isLoading = true;
-    document.getElementById('askBtn').disabled = true;
-    var typingEl = addTyping();
-
-    // Get context
-    var pasture = document.getElementById('ctxPasture').value.trim();
-    var weather = document.getElementById('ctxWeather').value.trim();
-    var tag = document.getElementById('ctxTag').value.trim();
-
-    // Add user message to history
-    conversationHistory.push({ role: 'user', content: q });
-    if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
-
-    var herdmateSheetId = localStorage.getItem('hm_sheet_id') || null;
-    var googleUserEmail = localStorage.getItem('hm_user_email') || null;
-
-    var requestBody = {
-      question: q,
-      operation: OPERATION,
-      pasture: pasture || null,
-      weather: weather || null,
-      tag_epc: tag || null,
-      user_id: googleUserEmail || OPERATION,
-      conversation_history: conversationHistory.slice(0, -1),
-      herdmate_sheet_id: herdmateSheetId,
-      google_user_email: googleUserEmail
-    };
-
-    // Attach photo if present
-    if (pendingPhoto) {
-      requestBody.image_base64 = pendingPhoto.base64;
-      requestBody.image_type = pendingPhoto.type;
+@app.get("/vet/status")
+async def vet_status():
+    return {
+        "status": "online",
+        "vet_knowledge_docs": vet_collection.count(),
+        "field_memory_docs": memory_collection.count(),
+        "ready": vet_collection.count() > 0,
+        "service_account": os.path.exists(CREDENTIALS_FILE)
     }
 
-    fetch(API_BASE + '/vet/ask', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      typingEl.remove();
-      addAssistantMessage(data);
-      // Add DAVE's answer to conversation history
-      if (data.answer) {
-        conversationHistory.push({ role: 'assistant', content: data.answer });
-        if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
-      }
-      // Clear photo after sending
-      clearPhoto();
-    })
-    .catch(function(err) {
-      typingEl.remove();
-      addMessage('assistant', '❌ Could not reach DAVE. Check your connection or server status.');
-    })
-    .finally(function() {
-      isLoading = false;
-      document.getElementById('askBtn').disabled = false;
-    });
-  };
+@app.get("/vet/health")
+async def health():
+    return {"status": "ok", "service": "HerdMate DAVE Vet AI v3"}
 
-  function addMessage(role, text) {
-    var wrap = document.getElementById('chatWrap');
-    var div = document.createElement('div');
-    div.className = 'msg ' + role;
-    var bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    bubble.textContent = text;
-    div.appendChild(bubble);
-    wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
-    return div;
-  }
-
-  function addAssistantMessage(data) {
-    var wrap = document.getElementById('chatWrap');
-    var div = document.createElement('div');
-    div.className = 'msg assistant';
-
-    var bubble = document.createElement('div');
-    bubble.className = 'bubble';
-    // Format answer text with line breaks
-    bubble.innerHTML = esc(data.answer).replace(/\n/g, '<br>');
-    div.appendChild(bubble);
-
-    // Sources
-    if (data.sources && data.sources.length > 0) {
-      var src = document.createElement('div');
-      src.className = 'sources';
-      src.innerHTML = '📚 Sources: ' + data.sources.map(function(s) {
-        var name = s.split('/').pop() || s;
-        return '<span>' + esc(name) + '</span>';
-      }).join('');
-      div.appendChild(src);
-    }
-
-    // Animal context card
-    if (data.animal_context) {
-      var ac = data.animal_context;
-      var cardLines = [];
-      if (ac.sex) cardLines.push(ac.sex);
-      if (ac.breed) cardLines.push(ac.breed);
-      if (ac.color) cardLines.push(ac.color);
-      if (ac.age) cardLines.push(ac.age + ' yrs');
-      if (ac.status) cardLines.push(ac.status);
-      if (ac.weight) cardLines.push(ac.weight + ' lbs');
-      if (ac.due_date && ac.due_date !== 'None' && ac.due_date !== '') cardLines.push('Due: ' + ac.due_date);
-      if (ac.palp_result) cardLines.push('Palp: ' + ac.palp_result);
-      if (ac.bcs) cardLines.push('BCS: ' + ac.bcs);
-
-      var card = document.createElement('div');
-      card.style.cssText = 'background:var(--orange-dim);border:1px solid var(--orange-muted);border-radius:8px;padding:8px 12px;margin-top:6px;font-size:0.78rem;';
-      card.innerHTML = '<div style="font-size:0.6rem;text-transform:uppercase;letter-spacing:1px;color:var(--orange);margin-bottom:4px;font-family:Oswald,sans-serif;">🐄 Tag #' + esc(String(ac.tag || '')) + ' — ' + esc(String(ac.source || '')) + '</div>' +
-        '<div style="color:var(--text);line-height:1.6;">' + cardLines.map(function(l){return esc(l);}).join(' · ') + '</div>';
-      div.appendChild(card);
-    }
-
-    // Past cases
-    if (data.similar_past_cases && data.similar_past_cases.length > 0) {
-      var past = document.createElement('div');
-      past.className = 'past-case';
-      past.innerHTML = '<div class="past-case-label">📋 Similar case from your field history</div>' +
-        esc(data.similar_past_cases[0]);
-      div.appendChild(past);
-    }
-
-    wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
-    // Speak the answer if DAVE voice is on
-    if (ttsEnabled && data.answer) speakText(data.answer);
-  }
-
-  function addTyping() {
-    var wrap = document.getElementById('chatWrap');
-    var div = document.createElement('div');
-    div.className = 'msg assistant';
-    var bubble = document.createElement('div');
-    bubble.className = 'bubble typing';
-    bubble.innerHTML = '<span></span><span></span><span></span>';
-    div.appendChild(bubble);
-    wrap.appendChild(div);
-    wrap.scrollTop = wrap.scrollHeight;
-    return div;
-  }
-
-  function esc(s) {
-    return String(s)
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;');
-  }
-
-  // ── TTS / DAVE VOICE ──
-  var TTS_BASE = 'https://api.herdmate.ag';
-  var ttsEnabled = false;
-  var ttsAudio = null;
-
-  window.toggleTTS = function() {
-    ttsEnabled = !ttsEnabled;
-    var btn = document.getElementById('ttsToggle');
-    var speedWrap = document.getElementById('speedWrap');
-    if (ttsEnabled) {
-      btn.textContent = '🔊 DAVE Speaks';
-      btn.style.borderColor = 'var(--orange)';
-      btn.style.color = 'var(--orange)';
-      speedWrap.style.display = 'flex';
-      // Test it
-      speakText('DAVE is ready.');
-    } else {
-      btn.textContent = '🔇 DAVE Silent';
-      btn.style.borderColor = '';
-      btn.style.color = '';
-      speedWrap.style.display = 'none';
-      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
-    }
-  };
-
-  function stripMarkdown(text) {
-    var t = text;
-    t = t.replace(/#{1,6} /g, '');
-    t = t.replace(/\*\*([^*]+)\*\*/g, '$1');
-    t = t.replace(/\*([^*]+)\*/g, '$1');
-    t = t.replace(/`([^`]+)`/g, '$1');
-    t = t.replace(/---/g, '. ');
-    t = t.replace(/\n\n/g, '. ');
-    t = t.replace(/\n/g, '. ');
-    t = t.replace(/\.\./g, '.');
-    t = t.replace(/  +/g, ' ');
-    return t.trim();
-  }
-
-  function speakText(text) {
-    if (!ttsEnabled) return;
-    var clean = stripMarkdown(text);
-    // Trim to first 600 chars so it's fast not a lecture
-    if (clean.length > 600) clean = clean.substring(0, 600) + '. See full response on screen.';
-
-    fetch(TTS_BASE + '/speak', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: clean })
-    })
-    .then(function(r) {
-      if (!r.ok) throw new Error('TTS failed');
-      return r.blob();
-    })
-    .then(function(blob) {
-      var url = URL.createObjectURL(blob);
-      if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
-      ttsAudio = new Audio(url);
-      var speed = parseFloat(document.getElementById('ttsSpeed').value) || 1.1;
-      ttsAudio.playbackRate = speed;
-      ttsAudio.play();
-      ttsAudio.onended = function() { URL.revokeObjectURL(url); };
-    })
-    .catch(function() {
-      // TTS failed silently — screen still shows answer
-    });
-  }
-
-  // ── VOICE INPUT ──
-  var recognition = null;
-  var isListening = false;
-
-  window.toggleVoiceInput = function() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Voice input not supported in this browser. Use Chrome.');
-      return;
-    }
-    if (isListening) {
-      if (recognition) recognition.stop();
-      return;
-    }
-    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = function() {
-      isListening = true;
-      var btn = document.getElementById('micBtn');
-      btn.textContent = '🔴';
-      btn.style.borderColor = 'var(--red)';
-      btn.style.color = 'var(--red)';
-    };
-
-    recognition.onresult = function(event) {
-      var transcript = event.results[0][0].transcript;
-      document.getElementById('questionInput').value = transcript;
-      // Auto submit after voice input
-      setTimeout(function() { askQuestion(); }, 300);
-    };
-
-    recognition.onend = function() {
-      isListening = false;
-      var btn = document.getElementById('micBtn');
-      btn.textContent = '🎤';
-      btn.style.borderColor = 'var(--border)';
-      btn.style.color = 'var(--muted)';
-    };
-
-    recognition.onerror = function() {
-      isListening = false;
-      var btn = document.getElementById('micBtn');
-      btn.textContent = '🎤';
-      btn.style.borderColor = 'var(--border)';
-      btn.style.color = 'var(--muted)';
-    };
-
-    recognition.start();
-  };
-
-  // ── DAY/NIGHT MODE ──
-  var dayMode = false;
-  window.toggleDayNight = function() {
-    dayMode = !dayMode;
-    var app = document.getElementById('app');
-    if (dayMode) {
-      app.classList.add('day');
-      document.getElementById('dayNightBtn').textContent = '☀️';
-    } else {
-      app.classList.remove('day');
-      document.getElementById('dayNightBtn').textContent = '🌙';
-    }
-  };
-
-  // ── SETTINGS ──
-  window.toggleSettings = function() {
-    var panel = document.getElementById('settingsPanel');
-    var showing = panel.style.display !== 'none';
-    if (!showing) {
-      // Populate current values
-      document.getElementById('sheetIdInput').value = localStorage.getItem('hm_sheet_id') || '';
-      document.getElementById('operationInput').value = localStorage.getItem('hm_operation') || '';
-      var email = localStorage.getItem('hm_user_email') || '';
-      var info = document.getElementById('settingsUserInfo');
-      if (email) {
-        info.textContent = '✅ Signed in as ' + email;
-        info.style.color = 'var(--green)';
-      } else {
-        info.textContent = '⚠️ Not signed into Google — sign in at the Scanner first';
-        info.style.color = 'var(--orange)';
-      }
-    }
-    panel.style.display = showing ? 'none' : 'block';
-  };
-
-  window.saveSettings = function() {
-    var sheetId = document.getElementById('sheetIdInput').value.trim();
-    var operation = document.getElementById('operationInput').value.trim();
-    if (sheetId) localStorage.setItem('hm_sheet_id', sheetId);
-    if (operation) {
-      localStorage.setItem('hm_operation', operation);
-      OPERATION = operation;
-    }
-    document.getElementById('settingsPanel').style.display = 'none';
-    // Recheck status with new settings
-    checkStatus();
-  };
-
-  // Store Google token for DAVE animal lookups
-  // The scanner app sets this when it authenticates
-  function refreshDAVEToken() {
-    var stored = localStorage.getItem('hm_google_token');
-    if (!stored) {
-      // Try to get from cookie or other source
-      // For now just use what scanner.herdmate.ag stored
-    }
-  }
-  refreshDAVEToken();
-
-  // Init
-  checkStatus();
-})();
-</script>
-</body>
-</html>
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8001)
