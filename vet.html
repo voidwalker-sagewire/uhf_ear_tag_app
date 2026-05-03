@@ -75,6 +75,7 @@
   .quick-q:hover { background:var(--orange); color:#000; }
 </style>
 </head>
+  <script src="config.js"></script>
 <body id="app">
 
 <header>
@@ -274,8 +275,9 @@
     conversationHistory.push({ role: 'user', content: q });
     if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
 
-    var herdmateSheetId = localStorage.getItem('hm_sheet_id') || null;
+    var herdmateSheetId = CONFIG.MASTER_SHEET_ID;
     var googleUserEmail = localStorage.getItem('hm_user_email') || null;
+
 
     var requestBody = {
       question: q,
