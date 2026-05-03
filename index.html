@@ -225,6 +225,7 @@
   .toast.blue { border-color:var(--blue); color:var(--blue); }
 </style>
 </head>
+  <script src="config.js"></script>
 <body id="app">
 
 <!-- CHROME REQUIRED -->
@@ -1111,7 +1112,7 @@
       return;
     }
     // OpenWeatherMap — reliable, fast, single call
-    var OWM_KEY = '6a70c4d2186f3c20c348e2e841d10c0c';
+    var OWM_KEY = CONFIG.OWM_KEY;
     var url = 'https://api.openweathermap.org/data/2.5/weather' +
       '?lat=' + lat +
       '&lon=' + lng +
