@@ -275,7 +275,7 @@
     conversationHistory.push({ role: 'user', content: q });
     if (conversationHistory.length > MAX_HISTORY) conversationHistory = conversationHistory.slice(-MAX_HISTORY);
 
-    var herdmateSheetId = CONFIG.MASTER_SHEET_ID;
+    var herdmateSheetId = localStorage.getItem('hm_sheet_id') || null;
     var googleUserEmail = localStorage.getItem('hm_user_email') || null;
 
 
