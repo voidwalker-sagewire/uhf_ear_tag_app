@@ -75,7 +75,7 @@
   .quick-q:hover { background:var(--orange); color:#000; }
 </style>
 </head>
-  <body id="app">
+<body id="app">
 
 <header>
   <div>
@@ -277,7 +277,6 @@
     var herdmateSheetId = localStorage.getItem('hm_sheet_id') || null;
     var googleUserEmail = localStorage.getItem('hm_user_email') || null;
 
-
     var requestBody = {
       question: q,
       operation: OPERATION,
@@ -301,9 +300,28 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(requestBody)
     })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+    .then(function(r) {
+      return r.json().then(function(data) {
+        return { ok: r.ok, status: r.status, data: data };
+      });
+    })
+    .then(function(result) {
       typingEl.remove();
+      var data = result.data;
+      // If HTTP error, surface the detail from FastAPI error responses
+      if (!result.ok) {
+        var errMsg = (data && (data.detail || data.error || data.message))
+          ? '⚠️ Server error: ' + data.detail
+          : '⚠️ Server returned status ' + result.status;
+        addMessage('assistant', errMsg);
+        console.error('DAVE API error', result.status, data);
+        return;
+      }
+      // Guard against missing answer field
+      if (!data.answer) {
+        console.error('DAVE response missing answer field:', data);
+        data.answer = data.detail || data.error || '⚠️ DAVE returned an empty response. Check server logs.';
+      }
       addAssistantMessage(data);
       // Add DAVE's answer to conversation history
       if (data.answer) {
@@ -315,6 +333,7 @@
     })
     .catch(function(err) {
       typingEl.remove();
+      console.error('DAVE fetch error:', err);
       addMessage('assistant', '❌ Could not reach DAVE. Check your connection or server status.');
     })
     .finally(function() {
