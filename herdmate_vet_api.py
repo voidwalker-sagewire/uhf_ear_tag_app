@@ -1,8 +1,23 @@
 #!/usr/bin/env python3
 """
-HerdMate DAVE Vet AI — FastAPI Backend v3
+HerdMate DAVE Vet AI — FastAPI Backend v3 (restored canonical)
 Uses Google Service Account for permanent server-side auth.
 No OAuth tokens. No browser dependency. Works forever.
+
+This is the full RAG-powered DAVE: ChromaDB knowledge base + field memory,
+Google Sheets animal lookup via service account, the DAVE triage prompt,
+photo support, and conversation history. NOT a bare Claude wrapper.
+
+Run:
+    pip install fastapi uvicorn chromadb sentence-transformers anthropic \
+        google-auth requests --break-system-packages
+    export ANTHROPIC_API_KEY='sk-ant-...'        # required, never hardcode
+    export CREDENTIALS_FILE='/root/credentials.json'   # service account JSON
+    python3 herdmate_vet_api.py                  # serves on port 8001
+
+Optional env vars: CHROMA_HOST, CHROMA_PORT, CLAUDE_MODEL, PORT.
+Front it with HTTPS (Certbot/Cloudflare) so the field app's Bluetooth and
+microphone work — browsers block those on plain HTTP.
 """
 
 import os
@@ -39,13 +54,25 @@ app.add_middleware(
 )
 
 # ── CONFIG ──
-CHROMA_HOST = "localhost"
-CHROMA_PORT = 8000
+CHROMA_HOST = os.environ.get("CHROMA_HOST", "localhost")
+CHROMA_PORT = int(os.environ.get("CHROMA_PORT", "8000"))
 VET_COLLECTION = "herdmate_vet_knowledge"
 MEMORY_COLLECTION = "herdmate_vet_memory"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-CREDENTIALS_FILE = "/root/credentials.json"
+CREDENTIALS_FILE = os.environ.get("CREDENTIALS_FILE", "/root/credentials.json")
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+SERVER_PORT = int(os.environ.get("PORT", "8001"))
+
+# Fail fast and loud if the key is missing. This is the single guard that
+# prevents DAVE from silently degrading into a keyless wrapper that returns
+# 500s on every question. The real DAVE always has its key in the environment.
+if not ANTHROPIC_API_KEY:
+    raise RuntimeError(
+        "ANTHROPIC_API_KEY is not set. Export it before starting DAVE:\n"
+        "    export ANTHROPIC_API_KEY='sk-ant-...'\n"
+        "Never hardcode the key into this file."
+    )
 
 # ── SERVICE ACCOUNT AUTH ──
 _service_creds = None
@@ -410,7 +437,7 @@ async def ask_vet(q: VetQuestion):
 
     try:
         response = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=CLAUDE_MODEL,
             max_tokens=700,
             system=dynamic_system,
             messages=claude_messages
@@ -457,4 +484,4 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=SERVER_PORT)
