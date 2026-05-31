@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
+<meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
 <title>DAVE — HerdMate Field Vet</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
@@ -95,6 +97,15 @@
 </header>
 
 <div class="status-bar warn" id="statusBar">⏳ Waking up DAVE...</div>
+
+<div id="debugPanel" style="background:#0d0d0d;border:1px solid var(--orange-muted);border-radius:8px;margin:8px 14px 0;padding:10px 12px;font-family:monospace;font-size:0.72rem;color:#8f8;max-height:240px;overflow-y:auto;">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+    <span style="color:var(--orange);font-weight:700;letter-spacing:0.5px;">🔧 DEBUG LOG — build debug-1</span>
+    <button onclick="document.getElementById('dbgBody').innerHTML='';" style="background:var(--panel2);border:1px solid var(--border);color:var(--muted);border-radius:5px;font-size:0.65rem;padding:3px 8px;cursor:pointer;">clear</button>
+  </div>
+  <div id="dbgTimer" style="color:var(--orange);min-height:1em;"></div>
+  <div id="dbgBody"></div>
+</div>
 
 <div class="disclaimer">
   <strong>⚠️ Field Reference Only</strong> — DAVE is a knowledge assistant, not a licensed veterinarian. Always call your vet for serious conditions. Use this to help you describe symptoms, identify possibilities, and decide urgency.
@@ -295,6 +306,12 @@
       requestBody.image_type = pendingPhoto.type;
     }
 
+    dbg('① question: "' + q + '"');
+    dbg('② API_BASE = ' + API_BASE);
+    dbg('③ POST → ' + API_BASE + '/vet/ask …');
+    dbgTimerStart();
+    var _t0 = Date.now();
+
     fetch(API_BASE + '/vet/ask', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -303,15 +320,26 @@
     .then(function(r) {
       return r.json().then(function(data) {
         return { ok: r.ok, status: r.status, data: data };
+      }).catch(function(parseErr) {
+        return { ok: r.ok, status: r.status, data: null, parseError: parseErr.message };
       });
     })
     .then(function(result) {
+      dbgTimerStop();
+      var secs = ((Date.now() - _t0) / 1000).toFixed(1);
+      dbg('④ response: HTTP ' + result.status + ' in ' + secs + 's');
       typingEl.remove();
-      var data = result.data;
+
+      if (result.parseError) {
+        dbg('✗ response was not JSON: ' + result.parseError);
+      }
+      var data = result.data || {};
+
       // If HTTP error, surface the detail from FastAPI error responses
       if (!result.ok) {
+        dbg('✗ server returned error status ' + result.status);
         var errMsg = (data && (data.detail || data.error || data.message))
-          ? '⚠️ Server error: ' + data.detail
+          ? '⚠️ Server error: ' + (data.detail || data.error || data.message)
           : '⚠️ Server returned status ' + result.status;
         addMessage('assistant', errMsg);
         console.error('DAVE API error', result.status, data);
@@ -319,8 +347,11 @@
       }
       // Guard against missing answer field
       if (!data.answer) {
+        dbg('⑤ ⚠️ no "answer" field. Raw body: ' + JSON.stringify(data).slice(0, 180));
         console.error('DAVE response missing answer field:', data);
         data.answer = data.detail || data.error || '⚠️ DAVE returned an empty response. Check server logs.';
+      } else {
+        dbg('⑤ ✓ answer received: ' + data.answer.length + ' chars — rendering now');
       }
       addAssistantMessage(data);
       // Add DAVE's answer to conversation history
@@ -332,15 +363,44 @@
       clearPhoto();
     })
     .catch(function(err) {
+      dbgTimerStop();
+      var secs = ((Date.now() - _t0) / 1000).toFixed(1);
+      dbg('✗ FETCH FAILED after ' + secs + 's: ' + err.message);
+      dbg('   → this is a network / connection problem, not the server');
       typingEl.remove();
       console.error('DAVE fetch error:', err);
-      addMessage('assistant', '❌ Could not reach DAVE. Check your connection or server status.');
+      addMessage('assistant', '❌ Could not reach DAVE: ' + err.message);
     })
     .finally(function() {
       isLoading = false;
       document.getElementById('askBtn').disabled = false;
     });
   };
+
+  function dbg(msg) {
+    var body = document.getElementById('dbgBody');
+    if (!body) return;
+    var t = new Date().toLocaleTimeString();
+    var line = document.createElement('div');
+    line.textContent = '[' + t + '] ' + msg;
+    body.appendChild(line);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  var _dbgTimerInt = null;
+  function dbgTimerStart() {
+    dbgTimerStop();
+    var t0 = Date.now();
+    var el = document.getElementById('dbgTimer');
+    _dbgTimerInt = setInterval(function() {
+      if (el) el.textContent = '⏳ waiting for DAVE… ' + ((Date.now() - t0) / 1000).toFixed(1) + 's';
+    }, 200);
+  }
+  function dbgTimerStop() {
+    if (_dbgTimerInt) { clearInterval(_dbgTimerInt); _dbgTimerInt = null; }
+    var el = document.getElementById('dbgTimer');
+    if (el) el.textContent = '';
+  }
 
   function addMessage(role, text) {
     var wrap = document.getElementById('chatWrap');
@@ -615,6 +675,8 @@
   refreshDAVEToken();
 
   // Init
+  dbg('page loaded — build debug-1');
+  dbg('API_BASE = ' + API_BASE);
   checkStatus();
 })();
 </script>
