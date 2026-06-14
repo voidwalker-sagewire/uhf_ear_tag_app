@@ -633,10 +633,59 @@
       setBleBar('scanning', '📶 Connecting to ' + bleDevice.name + '...');
       bleDevice.addEventListener('gattserverdisconnected', onBleDisconnected);
       var server = await bleDevice.gatt.connect();
-      var service = await server.getPrimaryService(NORDIC_UART_SERVICE);
-      bleChar = await service.getCharacteristic(NORDIC_UART_TX_CHAR);
-      await bleChar.startNotifications();
-      bleChar.addEventListener('characteristicvaluechanged', onBleData);
+
+      // ── SERVICE DISCOVERY — find all UUIDs the R6 advertises ──
+      var debugEl = document.getElementById('bleDebugLog');
+      if (debugEl) {
+        debugEl.innerHTML = '';
+        var discovering = document.createElement('div');
+        discovering.style.cssText = 'color:#d29922;font-size:0.7rem;font-family:monospace;padding:2px 0;';
+        discovering.textContent = '🔍 Discovering services...';
+        debugEl.appendChild(discovering);
+      }
+
+      var allServices = await server.getPrimaryServices();
+      for (var svc of allServices) {
+        if (debugEl) {
+          var svcEl = document.createElement('div');
+          svcEl.style.cssText = 'color:#4a9eff;font-size:0.68rem;font-family:monospace;padding:3px 0;border-top:1px solid #222;margin-top:3px;';
+          svcEl.textContent = '📡 SERVICE: ' + svc.uuid;
+          debugEl.appendChild(svcEl);
+        }
+        try {
+          var chars = await svc.getCharacteristics();
+          for (var ch of chars) {
+            if (debugEl) {
+              var chEl = document.createElement('div');
+              chEl.style.cssText = 'color:#4caf50;font-size:0.65rem;font-family:monospace;padding:1px 0 1px 12px;';
+              chEl.textContent = '↳ CHAR: ' + ch.uuid + ' [' + (ch.properties.notify ? 'NOTIFY ' : '') + (ch.properties.read ? 'READ ' : '') + (ch.properties.write ? 'WRITE ' : '') + (ch.properties.writeWithoutResponse ? 'WRITE_NO_RESP' : '') + ']';
+              debugEl.appendChild(chEl);
+            }
+          }
+        } catch(e) {}
+      }
+
+      if (debugEl) {
+        var doneEl = document.createElement('div');
+        doneEl.style.cssText = 'color:#e86a1a;font-size:0.7rem;font-family:monospace;padding:4px 0;border-top:1px solid #444;margin-top:4px;';
+        doneEl.textContent = '⬆ Screenshot this! Then pull trigger to see data.';
+        debugEl.appendChild(doneEl);
+      }
+
+      // Now try Nordic UART — if it fails we'll use what discovery found
+      try {
+        var service = await server.getPrimaryService(NORDIC_UART_SERVICE);
+        bleChar = await service.getCharacteristic(NORDIC_UART_TX_CHAR);
+        await bleChar.startNotifications();
+        bleChar.addEventListener('characteristicvaluechanged', onBleData);
+      } catch(e) {
+        if (debugEl) {
+          var errEl = document.createElement('div');
+          errEl.style.cssText = 'color:#e04040;font-size:0.68rem;font-family:monospace;padding:2px 0;';
+          errEl.textContent = '⚠ Nordic UART not found — need correct UUID from above';
+          debugEl.appendChild(errEl);
+        }
+      }
       bleConnected = true;
       setBleBar('connected', '📶 R6 Connected — ' + bleDevice.name);
       document.getElementById('bleDebugPanel').style.display = 'block';
