@@ -333,6 +333,16 @@
   <!-- BLE STATUS BAR — tap to connect R6 -->
   <div class="status-bar ble-disconnected" id="bleBar" onclick="connectR6()">📶 Tap to connect R6 scanner</div>
 
+  <!-- BLE DEBUG PANEL — toggle with button -->
+  <div id="bleDebugPanel" style="display:none;background:#0a0a0a;border-bottom:2px solid var(--blue);padding:8px 14px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span style="font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:var(--blue);font-family:'Oswald',sans-serif;">BLE Raw Debug</span>
+      <button onclick="document.getElementById('bleDebugLog').innerHTML=''" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);font-size:0.7rem;padding:2px 8px;cursor:pointer;">Clear</button>
+    </div>
+    <div id="bleDebugLog" style="max-height:160px;overflow-y:auto;color:#4a9eff;"></div>
+    <div style="font-size:0.65rem;color:var(--muted);margin-top:4px;">Pull R6 trigger to see raw data here</div>
+  </div>
+
   <div class="mode-selector">
     <button class="mode-tab active-hc" id="tabHC" onclick="switchMode('hc')">🐄 Head Count</button>
     <button class="mode-tab" id="tabBB" onclick="switchMode('bb')">📡 Bovine Beacon</button>
@@ -629,6 +639,7 @@
       bleChar.addEventListener('characteristicvaluechanged', onBleData);
       bleConnected = true;
       setBleBar('connected', '📶 R6 Connected — ' + bleDevice.name);
+      document.getElementById('bleDebugPanel').style.display = 'block';
       showToast('R6 Connected!', false);
       if (vibOn && navigator.vibrate) navigator.vibrate([100, 50, 100]);
     } catch(e) {
@@ -644,6 +655,7 @@
     bleDevice = null;
     bleChar = null;
     setBleBar('disconnected', '📶 R6 disconnected — tap to reconnect');
+    document.getElementById('bleDebugPanel').style.display = 'none';
     showToast('R6 disconnected', true);
   }
 
@@ -651,6 +663,18 @@
     var value = event.target.value;
     var decoder = new TextDecoder('utf-8');
     var chunk = decoder.decode(value);
+
+    // ── DEBUG: show raw incoming data on screen ──
+    var debugEl = document.getElementById('bleDebugLog');
+    if (debugEl) {
+      var hex = Array.from(new Uint8Array(value.buffer)).map(function(b){ return b.toString(16).padStart(2,'0'); }).join(' ');
+      var line = document.createElement('div');
+      line.style.cssText = 'font-size:0.65rem;font-family:monospace;border-bottom:1px solid #222;padding:2px 0;word-break:break-all;';
+      line.textContent = 'RAW: ' + JSON.stringify(chunk) + ' | HEX: ' + hex;
+      debugEl.insertBefore(line, debugEl.firstChild);
+      if (debugEl.children.length > 20) debugEl.removeChild(debugEl.lastChild);
+    }
+
     bleBuffer += chunk;
     var lines = bleBuffer.split(/[\r\n]+/);
     bleBuffer = lines.pop();
