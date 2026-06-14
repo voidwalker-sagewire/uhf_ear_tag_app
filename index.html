@@ -225,7 +225,6 @@
   .toast.blue { border-color:var(--blue); color:var(--blue); }
 </style>
 </head>
-  <script src="config.js"></script>
 <body id="app">
 
 <!-- CHROME REQUIRED -->
@@ -481,36 +480,41 @@
   function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
 
   function flushOfflineQueue() {
-    var q=queueLoad();
-    if(!q.length||!accessToken||!sheetId) return;
-    var item=q[0]; var record=item.record; var mode=item.mode;
-    var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
-    var row;
-    if(mode==='Bovine Beacon'){
-      row=[[record.date,record.time,record.tag,record.targetTag||'',record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
-    } else {
-      row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,
-        record.firstGPS?record.firstGPS.lat:'',
-        record.firstGPS?record.firstGPS.lng:'',
-        record.firstGPS?record.firstGPS.acc:'',
-        record.firstGPS&&record.firstGPS.alt!==null?record.firstGPS.alt:'',
-        record.readCount,'Head Count',operationName,
-        record.weather?record.weather.temp:'',
-        record.weather?record.weather.condition:'',
-        record.weather?record.weather.wind:'',
-        record.weather?record.weather.humidity:'']];
-    }
-    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
-      method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
-    }).then(function(r){
-      if(r.ok){
-        queueRemove(0);
-        var key=record.tag+'__'+record.pasture;
-        if(uniqueTags[key]){uniqueTags[key].synced=true;renderTable();}
-        var remaining=queueLoad().length;
-        setSheetsBar('ok',remaining>0?'✅ Syncing offline — '+remaining+' left':'✅ All data synced — '+operationName);
+    if(!accessToken||!sheetId) return;
+    function processNext() {
+      var q=queueLoad();
+      if(!q.length){setSheetsBar('ok','✅ All data synced — '+operationName);return;}
+      var item=q[0]; var record=item.record; var mode=item.mode;
+      var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
+      var row;
+      if(mode==='Bovine Beacon'){
+        row=[[record.date,record.time,record.tag,record.targetTag||'',record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
+      } else {
+        row=[[record.pasture,record.firstDate,record.tag,record.pasture,record.firstTime,
+          record.firstGPS?record.firstGPS.lat:'',
+          record.firstGPS?record.firstGPS.lng:'',
+          record.firstGPS?record.firstGPS.acc:'',
+          record.firstGPS&&record.firstGPS.alt!==null?record.firstGPS.alt:'',
+          record.readCount,'Head Count',operationName,
+          record.weather?record.weather.temp:'',
+          record.weather?record.weather.condition:'',
+          record.weather?record.weather.wind:'',
+          record.weather?record.weather.humidity:'']];
       }
-    }).catch(function(){});
+      fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+        method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
+      }).then(function(r){
+        if(r.ok){
+          queueRemove(0);
+          var key=record.tag+'__'+record.pasture;
+          if(uniqueTags[key]){uniqueTags[key].synced=true;renderTable();}
+          var remaining=queueLoad().length;
+          setSheetsBar('ok',remaining>0?'✅ Syncing offline — '+remaining+' left':'✅ All data synced — '+operationName);
+          if(remaining>0) setTimeout(processNext,200);
+        }
+      }).catch(function(){});
+    }
+    processNext();
   }
 
   // ── CHROME CHECK ──
@@ -617,7 +621,11 @@
           { namePrefix: 'Nordic' },
           { namePrefix: 'CW' },
           { namePrefix: 'Chainway' },
-          { namePrefix: 'HR6' }
+          { namePrefix: 'HR6' },
+          { namePrefix: 'R6' },
+          { namePrefix: 'UHF' },
+          { namePrefix: 'RFID' },
+          { namePrefix: 'HerdMate' }
         ],
         optionalServices: [NORDIC_UART_SERVICE]
       });
@@ -849,7 +857,7 @@
         record.weather?record.weather.wind:'',
         record.weather?record.weather.humidity:'']];
     }
-    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:L/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     }).then(function(r){
       if(r.ok){
@@ -867,8 +875,30 @@
     });
   }
 
-  // DAY/NIGHT
-  window.toggleMode=function(){dayMode=!dayMode;document.getElementById('app').className=dayMode?'day':'';document.getElementById('modeBtn').textContent=dayMode?'🌙':'☀️';};
+  // ── UPDATE WEATHER ON EXISTING SHEET ROW ──
+  // After initial write, if weather arrives we append a corrected row.
+  // The original row stays; this adds a second updated row with weather filled in.
+  function updateSheetWeather(record) {
+    if (!accessToken || !sheetId || !record.weather) return;
+    var tab = 'Head Count';
+    var row = [[record.pasture, record.firstDate, record.tag, record.pasture, record.firstTime,
+      record.firstGPS ? record.firstGPS.lat : '',
+      record.firstGPS ? record.firstGPS.lng : '',
+      record.firstGPS ? record.firstGPS.acc : '',
+      record.firstGPS && record.firstGPS.alt !== null ? record.firstGPS.alt : '',
+      record.readCount, 'Head Count', operationName,
+      record.weather.temp,
+      record.weather.condition,
+      record.weather.wind,
+      record.weather.humidity]];
+    fetch('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + encodeURIComponent(tab) + '!A:L/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: row })
+    }).catch(function() {}); // silent — weather row is best-effort
+  }
+
+  // DAY/NIGHT  window.toggleMode=function(){dayMode=!dayMode;document.getElementById('app').className=dayMode?'day':'';document.getElementById('modeBtn').textContent=dayMode?'🌙':'☀️';};
 
   // HEAD COUNT
   document.getElementById('pastureInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();setPasture();}});
@@ -1112,7 +1142,7 @@
       return;
     }
     // OpenWeatherMap — reliable, fast, single call
-    var OWM_KEY = CONFIG.OWM_KEY;
+    var OWM_KEY = '6a70c4d2186f3c20c348e2e841d10c0c';
     var url = 'https://api.openweathermap.org/data/2.5/weather' +
       '?lat=' + lat +
       '&lon=' + lng +
@@ -1175,7 +1205,7 @@
   }
 
   function stopJawsHaptics() {
-    if (jawsInterval) { clearInterval(jawsInterval); jawsInterval = null; }
+    if (jawsInterval) { clearTimeout(jawsInterval); jawsInterval = null; }
     if (navigator.vibrate) navigator.vibrate(0);
   }
 
@@ -1351,11 +1381,8 @@
     if (urlEl) urlEl.textContent = window.location.href;
 
     // Check browser
-    if (isBrave && isBrave()) {
-      showScreen('chromeScreen');
-      return;
-    }
-    if (!isChrome()) {
+    var brave = !!(navigator.brave && navigator.brave.isBrave);
+    if (brave || !isChrome()) {
       showScreen('chromeScreen');
       return;
     }
