@@ -729,8 +729,18 @@
     bleBuffer = lines.pop();
     lines.forEach(function(line) {
       line = line.trim();
-      // Check if line contains RSSI data (format varies by firmware)
-      // Some R6 firmware sends: EPC,RSSI or EPC|-70 or just EPC
+      if (!line) return;
+
+      // ── Chainway binary protocol packet (A5 5A header) ──
+      // These are status/heartbeat packets — no EPC data inside, skip them
+      if (line.charCodeAt(0) === 0xA5 && line.charCodeAt(1) === 0x5A) return;
+
+      // ── Chainway text protocol: "EPC:XXXXXXXX" format ──
+      if (line.toUpperCase().startsWith('EPC:')) {
+        line = line.substring(4).trim();
+      }
+
+      // ── Strip trailing RSSI if present: EPC,RSSI or EPC|RSSI ──
       var rssiMatch = line.match(/,(-\d+)$/) || line.match(/\|(-\d+)$/);
       if (rssiMatch) {
         var rssi = parseInt(rssiMatch[1]);
@@ -739,7 +749,8 @@
         }
         line = line.replace(rssiMatch[0], '');
       }
-      var epc = line.toUpperCase();
+
+      var epc = line.trim().toUpperCase();
       if (epc) processIncomingTag(epc);
     });
   }
