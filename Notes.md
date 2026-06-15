@@ -1,1 +1,3 @@
+6/14/2026 2053 I uploaded the R6 Sled owners manual in the project area and Claude used that to make the latest Index.html. Hopefully that gets this app back up and running correctly. 
+
 6/14/2026 0612 I need to fix the scanner app (Tag Reaper tm) to work with the R6 Sled. R6 Sled works with another app, but not Tag Reaper tm. Also need to get Bovine Beacon tm working also. 
