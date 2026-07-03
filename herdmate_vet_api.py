@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-HerdMate DAVE Vet AI — FastAPI Backend v3 (restored canonical)
+HerdMate DAVE Vet AI — FastAPI Backend v3.1 (duplicate-tag fix)
 Uses Google Service Account for permanent server-side auth.
 No OAuth tokens. No browser dependency. Works forever.
 
-This is the full RAG-powered DAVE: ChromaDB knowledge base + field memory,
-Google Sheets animal lookup via service account, the DAVE triage prompt,
-photo support, and conversation history. NOT a bare Claude wrapper.
+v3.1 CHANGES FROM v3:
+- find_animal() now collects ALL matches for a tag across both tabs
+  instead of returning the first hit. Ranches reuse tag numbers across
+  years, so "765" can be a sold 2025 bull AND a live 2026 heifer calf.
+  We rank matches (active status first, then most recent date) and
+  attach the runner-up matches so DAVE can flag ambiguity instead of
+  silently guessing and confusing the rancher.
+- format_animal_context() now surfaces "_other_matches" so DAVE's
+  answer can say "I've got two 765s, which one?" instead of assuming.
+- VET_SYSTEM_PROMPT updated with explicit instruction on this behavior.
 
 Run:
     pip install fastapi uvicorn chromadb sentence-transformers anthropic \
@@ -37,7 +44,7 @@ import anthropic
 from google.oauth2.service_account import Credentials
 import google.auth.transport.requests
 
-app = FastAPI(title="HerdMate DAVE Vet AI", version="3.0.0")
+app = FastAPI(title="HerdMate DAVE Vet AI", version="3.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -167,11 +174,35 @@ def sheets_get(token: str, sheet_id: str, range_name: str):
         print(f"Sheets request error: {e}")
         return []
 
+def _is_active_status(status: str) -> bool:
+    """True if a status string reads as 'currently on the operation'."""
+    s = str(status).strip().lower()
+    if not s:
+        return True  # blank status = assume active, don't punish missing data
+    if "inactive" in s or "sold" in s or "dead" in s or "died" in s or "culled" in s:
+        return False
+    return True
+
+def _best_date(record: dict) -> str:
+    """Pull whichever date field a record has for recency sorting."""
+    return record.get("birth_date") or record.get("date") or ""
+
 def find_animal(sheet_id: str, tag_identifier: str):
     """
     Look up an animal by tag number or UHF EPC.
-    Searches Calf Tracker first, then Ranch Tracker.
-    tag_identifier can be a visual tag number (3476) or UHF EPC.
+
+    Ranches reuse tag numbers across years — a "765" ear tag from a sold
+    2025 bull gets rehung on a brand new 2026 heifer calf. The old
+    behavior returned whichever row happened to appear first in the
+    sheet, which meant DAVE would confidently talk about a dead/sold
+    animal while the rancher was asking about the live one standing in
+    front of them.
+
+    This version collects EVERY match across both tabs, ranks them
+    (active status first, then most recent date), and returns the best
+    match with any other matches attached under "_other_matches" so the
+    system prompt can tell DAVE to flag the ambiguity instead of
+    guessing silently.
     """
     if not tag_identifier or not sheet_id:
         return None
@@ -186,8 +217,9 @@ def find_animal(sheet_id: str, tag_identifier: str):
         return None
 
     tag = str(tag_identifier).strip()
+    all_matches = []
 
-    # ── SEARCH CALF TRACKER ──
+    # ── SEARCH CALF TRACKER — collect ALL matches, not just the first ──
     try:
         calf_data = sheets_get(token, sheet_id, "Calf Tracker!A:AF")
         if calf_data and len(calf_data) > 1:
@@ -199,7 +231,7 @@ def find_animal(sheet_id: str, tag_identifier: str):
                 calf_tag = str(row_dict.get("Calf Tag", "")).strip()
                 uhf = str(row_dict.get("UHF#", "")).strip()
                 if calf_tag == tag or (uhf and uhf == tag):
-                    result = {
+                    all_matches.append({
                         "source": "Calf Tracker",
                         "tag": calf_tag,
                         "uhf": uhf,
@@ -218,13 +250,12 @@ def find_animal(sheet_id: str, tag_identifier: str):
                         "notes": row_dict.get("Calving Notes", ""),
                         "gps": row_dict.get("User Location", ""),
                         "tagger": row_dict.get("Created By", ""),
-                    }
-                    set_cached_animal(cache_key, result)
-                    return result
+                        "photo": row_dict.get("Dam Photo", "") or row_dict.get("Calf Photo", ""),
+                    })
     except Exception as e:
         print(f"Calf Tracker search error: {e}")
 
-    # ── SEARCH RANCH TRACKER ──
+    # ── SEARCH RANCH TRACKER — collect ALL matches, not just the first ──
     try:
         ranch_data = sheets_get(token, sheet_id, "Ranch Tracker!A:BZ")
         if ranch_data and len(ranch_data) > 1:
@@ -236,7 +267,7 @@ def find_animal(sheet_id: str, tag_identifier: str):
                 tag_num = str(row_dict.get("Tag #", "")).strip()
                 uhf = str(row_dict.get("UHF#", "")).strip()
                 if tag_num == tag or (uhf and uhf == tag):
-                    result = {
+                    all_matches.append({
                         "source": "Ranch Tracker",
                         "tag": tag_num,
                         "uhf": uhf,
@@ -258,14 +289,43 @@ def find_animal(sheet_id: str, tag_identifier: str):
                         "bcs": row_dict.get("BCS", ""),
                         "disposition": row_dict.get("Disposition", ""),
                         "notes": row_dict.get("Notes", ""),
-                    }
-                    set_cached_animal(cache_key, result)
-                    return result
+                        "photo": row_dict.get("Photo", ""),
+                    })
     except Exception as e:
         print(f"Ranch Tracker search error: {e}")
 
-    set_cached_animal(cache_key, None)
-    return None
+    if not all_matches:
+        set_cached_animal(cache_key, None)
+        return None
+
+    # ── RANK: active status first, then most recent date first ──
+    all_matches.sort(
+        key=lambda m: (_is_active_status(m.get("status", "")), _best_date(m)),
+        reverse=True
+    )
+
+    best_match = all_matches[0]
+
+    # If more than one animal shares this tag, attach the runners-up so
+    # the system prompt / DAVE can flag the ambiguity instead of quietly
+    # picking one and confusing the rancher when it's the wrong animal.
+    if len(all_matches) > 1:
+        best_match = dict(best_match)  # don't mutate cached dict identity
+        best_match["_ambiguous"] = True
+        best_match["_other_matches"] = [
+            {
+                "source": m.get("source"),
+                "tag": m.get("tag"),
+                "status": m.get("status") or "unknown",
+                "date": _best_date(m) or "unknown date",
+                "color": m.get("color"),
+                "type": m.get("type") or m.get("breed"),
+            }
+            for m in all_matches[1:]
+        ]
+
+    set_cached_animal(cache_key, best_match)
+    return best_match
 
 def format_animal_context(animal: dict) -> str:
     if not animal:
@@ -297,6 +357,23 @@ def format_animal_context(animal: dict) -> str:
     if animal.get('pasture'): lines.append(f"Pasture: {animal['pasture']}")
     if animal.get('disposition'): lines.append(f"Disposition: {animal['disposition']}")
     if animal.get('notes') and str(animal['notes']) not in ['', 'None']: lines.append(f"Notes: {animal['notes']}")
+    if animal.get('photo') and str(animal['photo']) not in ['', 'None']: lines.append(f"Photo on file: {animal['photo']}")
+
+    # ── Flag ambiguity so DAVE tells the rancher instead of guessing ──
+    if animal.get('_ambiguous') and animal.get('_other_matches'):
+        lines.append("")
+        lines.append("⚠️ MULTIPLE ANIMALS SHARE THIS TAG NUMBER. You are looking at the")
+        lines.append("most likely one (active status and/or most recent), but there")
+        lines.append("are other records with the same tag:")
+        for m in animal['_other_matches']:
+            lines.append(
+                f"  - {m['source']}: tag {m['tag']}, {m.get('color','')} {m.get('type','')}, "
+                f"status: {m['status']}, date: {m['date']}"
+            )
+        lines.append("Ask the rancher which animal they mean if the conversation doesn't")
+        lines.append("make it obvious. Don't silently assume — tag numbers get reused")
+        lines.append("across years on working ranches.")
+
     return "\n".join(lines)
 
 # ── RAG ──
@@ -358,6 +435,14 @@ If you do recommend a vet call, say it once clearly and move on.
 
 When you have an animal record, use it. Reference specific details — tag number, age, dam, birth weight.
 Make your answers personal to that specific animal.
+
+TAG NUMBER AMBIGUITY: Working ranches reuse tag numbers across years — the animal
+record you're given may include a note that OTHER animals share this same tag
+(look for "MULTIPLE ANIMALS SHARE THIS TAG NUMBER" in the record). When you see
+that note, don't silently assume you have the right animal. Briefly confirm which
+one the rancher means — mention the other match(es) by status/date/color so they
+can correct you in one word if you guessed wrong. Once they confirm or the
+conversation makes it obvious, drop it and move on. Don't belabor it.
 
 You have access to:
 1. Veterinary knowledge base — MSD Veterinary Manual and beef cattle extension publications
@@ -480,7 +565,7 @@ async def vet_status():
 
 @app.get("/vet/health")
 async def health():
-    return {"status": "ok", "service": "HerdMate DAVE Vet AI v3"}
+    return {"status": "ok", "service": "HerdMate DAVE Vet AI v3.1"}
 
 if __name__ == "__main__":
     import uvicorn
