@@ -539,26 +539,37 @@
     // Trim to first 600 chars so it's fast not a lecture
     if (clean.length > 600) clean = clean.substring(0, 600) + '. See full response on screen.';
 
+    dbg('🔊① TTS request: ' + clean.length + ' chars → ' + TTS_BASE + '/speak');
+    var _ttsT0 = Date.now();
+
     fetch(TTS_BASE + '/speak', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text: clean })
     })
     .then(function(r) {
-      if (!r.ok) throw new Error('TTS failed');
+      var secs = ((Date.now() - _ttsT0) / 1000).toFixed(1);
+      dbg('🔊② TTS response: HTTP ' + r.status + ' in ' + secs + 's');
+      if (!r.ok) throw new Error('TTS server returned HTTP ' + r.status);
       return r.blob();
     })
     .then(function(blob) {
+      dbg('🔊③ audio received: ' + blob.size + ' bytes, type ' + blob.type);
+      if (!blob.size) throw new Error('TTS returned an empty audio file');
       var url = URL.createObjectURL(blob);
       if (ttsAudio) { ttsAudio.pause(); ttsAudio = null; }
       ttsAudio = new Audio(url);
       var speed = parseFloat(document.getElementById('ttsSpeed').value) || 1.1;
       ttsAudio.playbackRate = speed;
-      ttsAudio.play();
+      ttsAudio.play().then(function() {
+        dbg('🔊④ ✓ audio playing');
+      }).catch(function(playErr) {
+        dbg('🔊✗ browser blocked playback: ' + playErr.message);
+      });
       ttsAudio.onended = function() { URL.revokeObjectURL(url); };
     })
-    .catch(function() {
-      // TTS failed silently — screen still shows answer
+    .catch(function(err) {
+      dbg('🔊✗ TTS FAILED: ' + err.message);
     });
   }
 
