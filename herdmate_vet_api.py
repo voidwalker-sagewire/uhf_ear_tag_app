@@ -44,7 +44,33 @@ CHROMA_PORT = 8000
 VET_COLLECTION = "herdmate_vet_knowledge"
 MEMORY_COLLECTION = "herdmate_vet_memory"
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-LOOKUP_API_SECRET = os.environ.get("LOOKUP_API_SECRET", "")
+ALLOWED_LOOKUP_EMAILS = [e.strip().lower() for e in os.environ.get("ALLOWED_LOOKUP_EMAILS", "").split(",") if e.strip()]
+
+def verify_google_identity(bearer_header: Optional[str]) -> Optional[str]:
+    """
+    Takes the raw 'Authorization: Bearer <token>' header from Scout/Sentinel
+    (the same access token they already got from Google Sign-In) and asks
+    Google directly whether it's real and still valid. Returns the signed-in
+    email if valid, otherwise None. No secrets stored anywhere — the proof
+    of identity only exists after a real person signs in.
+    """
+    if not bearer_header or not bearer_header.lower().startswith("bearer "):
+        return None
+    token = bearer_header.split(" ", 1)[1].strip()
+    try:
+        resp = http_requests.get(
+            "https://www.googleapis.com/oauth2/v3/tokeninfo",
+            params={"access_token": token},
+            timeout=5
+        )
+        if not resp.ok:
+            return None
+        info = resp.json()
+        email = info.get("email", "").lower()
+        return email if email else None
+    except Exception as e:
+        print(f"Google token verify error: {e}")
+        return None
 CREDENTIALS_FILE = "/root/credentials.json"
 SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
 
@@ -447,23 +473,26 @@ class AnimalLookupRequest(BaseModel):
     herdmate_sheet_id: str
 
 @app.post("/vet/lookup_animal")
-async def lookup_animal(q: AnimalLookupRequest, x_lookup_secret: Optional[str] = Header(None)):
+async def lookup_animal(q: AnimalLookupRequest, authorization: Optional[str] = Header(None)):
     """
     Plain animal lookup by scanned UHF tag. No AI call, no RAG search,
     no memory writes — just reads Calf Tracker / Ranch Tracker and
     returns the matching row (or none). Used by Scout and Sentinel
     for on-scan record display.
 
-    Requires the X-Lookup-Secret header to match LOOKUP_API_SECRET —
-    this endpoint has no other auth, so this is the only thing
-    stopping anyone on the internet from reading your herd data.
+    Auth: requires the same Google Sign-In access token the app already
+    gets when Mike signs in. The server checks with Google that it's a
+    real, currently-valid token, then checks the signed-in email against
+    ALLOWED_LOOKUP_EMAILS. Nothing secret is ever stored client-side —
+    this can't leak from a public repo the way a hardcoded key could.
     """
-    if not LOOKUP_API_SECRET:
-        # Fails closed: if the server-side secret was never set, refuse
-        # every request rather than silently running wide open.
-        raise HTTPException(status_code=503, detail="Lookup API not configured — LOOKUP_API_SECRET missing on server")
-    if not x_lookup_secret or x_lookup_secret != LOOKUP_API_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid or missing lookup secret")
+    if not ALLOWED_LOOKUP_EMAILS:
+        raise HTTPException(status_code=503, detail="Lookup API not configured — ALLOWED_LOOKUP_EMAILS missing on server")
+    email = verify_google_identity(authorization)
+    if not email:
+        raise HTTPException(status_code=401, detail="Sign in with Google required")
+    if email not in ALLOWED_LOOKUP_EMAILS:
+        raise HTTPException(status_code=403, detail="This Google account is not authorized for animal lookups")
     if not q.tag_epc or not q.herdmate_sheet_id:
         raise HTTPException(status_code=400, detail="tag_epc and herdmate_sheet_id are required")
     animal = find_animal(q.herdmate_sheet_id, q.tag_epc)
