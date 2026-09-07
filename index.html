@@ -450,12 +450,10 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="config.js"></script>
 <script>
 (function() {
   var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
-  var DCC_SHEET_ID = (typeof CONFIG !== 'undefined' && CONFIG.MASTER_SHEET_ID) ? CONFIG.MASTER_SHEET_ID : '';
-  var LOOKUP_SECRET = (typeof CONFIG !== 'undefined' && CONFIG.LOOKUP_SECRET) ? CONFIG.LOOKUP_SECRET : '';
+  var DCC_SHEET_ID = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI'; // DCC Ranch/Calf Tracker — safe to hardcode now the server checks your Google sign-in, not this ID
   var LOOKUP_API = 'https://dave.sagewire.dev/vet/lookup_animal';
   var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
   var YEAR = new Date().getFullYear();
@@ -1063,10 +1061,10 @@
   // ── DCC ANIMAL LOOKUP ──
   // record.animal states: undefined = not looked up yet, null = looked up but no match, {..} = matched record
   function lookupAnimal(key, record) {
-    if (!DCC_SHEET_ID || !LOOKUP_SECRET) { record.animal = null; return; } // config.js missing/not deployed — skip silently
+    if (!DCC_SHEET_ID || !accessToken) { record.animal = null; return; } // not signed in yet — skip silently
     fetch(LOOKUP_API, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Lookup-Secret': LOOKUP_SECRET },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
       body: JSON.stringify({ tag_epc: record.tag, herdmate_sheet_id: DCC_SHEET_ID })
     })
     .then(function(r){ return r.json(); })
