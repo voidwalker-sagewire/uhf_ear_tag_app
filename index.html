@@ -324,6 +324,7 @@
     <div class="hdr-right">
       <button class="mode-btn" id="lockBtn" onclick="toggleRotation()" title="Lock screen rotation">🔄</button>
       <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
+      <button class="hdr-menu" id="openSheetBtn" onclick="openMySheet()" title="Open the Google Sheet this device is synced to">📄 Sheet</button>
       <button class="hdr-menu" onclick="signOut()">Sign Out</button>
     </div>
   </header>
@@ -449,9 +450,13 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="config.js"></script>
 <script>
 (function() {
   var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
+  var DCC_SHEET_ID = (typeof CONFIG !== 'undefined' && CONFIG.MASTER_SHEET_ID) ? CONFIG.MASTER_SHEET_ID : '';
+  var LOOKUP_SECRET = (typeof CONFIG !== 'undefined' && CONFIG.LOOKUP_SECRET) ? CONFIG.LOOKUP_SECRET : '';
+  var LOOKUP_API = 'https://dave.sagewire.dev/vet/lookup_animal';
   var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
   var YEAR = new Date().getFullYear();
 
@@ -521,8 +526,14 @@
           var remaining=queueLoad().length;
           setSheetsBar('ok',remaining>0?'✅ Syncing offline — '+remaining+' left':'✅ All data synced — '+operationName);
           if(remaining>0) setTimeout(processNext,200);
+        } else {
+          var n=queueLoad().length;
+          setSheetsBar('err','❌ Not syncing — '+n+' saved on device (tap 🔄 to retry)');
         }
-      }).catch(function(){});
+      }).catch(function(){
+        var n=queueLoad().length;
+        setSheetsBar('err','❌ Offline — '+n+' saved on device');
+      });
     }
     processNext();
   }
@@ -835,6 +846,10 @@
 
   // AUTH
   window.signIn=function(){if(tokenClient)tokenClient.requestAccessToken({prompt:''});else showToast('Loading...');};
+  window.openMySheet=function(){
+    if(!sheetId){showToast('No sheet connected yet',true);return;}
+    window.open('https://docs.google.com/spreadsheets/d/'+sheetId+'/edit','_blank');
+  };
   window.signOut=function(){
     if(accessToken){google.accounts.oauth2.revoke(accessToken,function(){});accessToken=null;}
     if(bleDevice&&bleDevice.gatt.connected) bleDevice.gatt.disconnect();
@@ -1023,7 +1038,7 @@
       uniqueTags[key].lastTime=timeStr;
       renderTable();updateStats();updateHeadcountBanner();
     } else {
-      var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null,weather:null};
+      var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null,weather:null,animal:undefined};
       uniqueTags[key]=record;
       var zone=document.getElementById('scanZone');
       zone.className='scan-zone lit';
@@ -1033,6 +1048,7 @@
       // Write to sheet immediately with whatever we have
       // Then fetch weather and update the record display
       writeToSheet(record, 'Head Count');
+      lookupAnimal(key, record);
       if (gps) {
         fetchWeather(gps.lat, gps.lng, function(weather) {
           record.weather = weather;
@@ -1043,6 +1059,60 @@
       }
     }
   }
+
+  // ── DCC ANIMAL LOOKUP ──
+  // record.animal states: undefined = not looked up yet, null = looked up but no match, {..} = matched record
+  function lookupAnimal(key, record) {
+    if (!DCC_SHEET_ID || !LOOKUP_SECRET) { record.animal = null; return; } // config.js missing/not deployed — skip silently
+    fetch(LOOKUP_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Lookup-Secret': LOOKUP_SECRET },
+      body: JSON.stringify({ tag_epc: record.tag, herdmate_sheet_id: DCC_SHEET_ID })
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(data){
+      record.animal = data.found ? data.animal : null;
+      renderTable();
+    })
+    .catch(function(){
+      record.animal = null; // treat lookup failure same as no-match, don't block scanning
+      renderTable();
+    });
+  }
+
+  window.showAnimalModal = function(key) {
+    var r = uniqueTags[key];
+    if (!r) return;
+    if (r.animal === undefined) { showToast('Still looking up this tag...'); return; }
+    if (r.animal === null) { showToast('No DCC record found for '+r.tag); return; }
+    var a = r.animal;
+    var overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    var sheet = document.createElement('div');
+    sheet.className = 'modal-sheet';
+    var rows = [
+      ['Tag #', a.tag], ['UHF#', a.uhf], ['Source', a.source],
+      ['Display ID', a.display_id], ['Sex', a.sex], ['Breed', a.breed],
+      ['Type', a.type], ['Color', a.color],
+      ['Birth date', a.birth_date || a.date], ['Age', a.age],
+      ['Dam', a.dam || a.dam_tag], ['Sire', a.sire],
+      ['Pasture', a.pasture], ['Status', a.status],
+      ['Weight', a.weight || a.birth_weight], ['BCS', a.bcs || a.dam_bcs],
+      ['Notes', a.notes]
+    ].filter(function(p){ return p[1]; });
+    var body = rows.map(function(p){ return '<div style="margin:4px 0;font-size:.85rem"><b>'+esc(p[0])+':</b> '+esc(p[1])+'</div>'; }).join('');
+    sheet.innerHTML =
+      '<button class="modal-close" onclick="closeAnimalModal()">✕</button>' +
+      '<div class="modal-title">'+esc(a.tag || 'Animal')+' — '+esc(a.status || a.source || '')+'</div>' +
+      body;
+    overlay.appendChild(sheet);
+    overlay.id = 'animalModalOverlay';
+    document.body.appendChild(overlay);
+  };
+  window.closeAnimalModal = function() {
+    var el = document.getElementById('animalModalOverlay');
+    if (el) el.remove();
+  };
 
   function updateHeadcountBanner(){
     var keys=Object.keys(uniqueTags).filter(function(k){return uniqueTags[k].pasture===currentPasture;});
@@ -1156,7 +1226,10 @@
         ?'<span class="gps-line ok">🌤 '+r.weather.temp+' · '+r.weather.condition+'</span>'
         :(r.firstGPS?'<span class="gps-line" style="color:#555">⏳ fetching weather...</span>':'');
       var syncHtml=r.synced===null?'<span style="color:var(--orange);font-size:.8rem">⏳</span>':r.synced?'<span style="color:var(--green);font-size:.8rem">✅</span>':'<span style="color:var(--red);font-size:.75rem">⚠️</span>';
-      rows+='<tr class="'+(i===0?'flash':'')+'"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
+      var animalHtml=r.animal===undefined?'<span style="color:var(--muted);font-size:.75rem">⏳ checking DCC...</span>'
+        :r.animal===null?'<span style="color:var(--muted);font-size:.75rem">❔ no DCC match</span>'
+        :'<span style="color:var(--green);font-size:.78rem;text-decoration:underline">🐄 '+esc(r.animal.tag||'')+' — tap for record</span>';
+      rows+='<tr class="'+(i===0?'flash':'')+'" onclick="showAnimalModal(\''+esc(k).replace(/'/g,"\\'")+'\')" style="cursor:pointer"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'<br>'+animalHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
     });
     tbody.innerHTML=rows;
   }
