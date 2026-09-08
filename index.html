@@ -867,9 +867,11 @@
     showScreen('loginScreen');
   };
   function onSignedIn() {
-    loadLocal();
-    if (sheetId&&operationName) launchApp();
-    else showScreen('onboardScreen');
+    // DCC's custom build: no per-user workspace creation. Every sign-in
+    // writes straight into DCC's one real operational sheet — the same
+    // sheet the animal lookup already reads from.
+    saveLocal(DCC_SHEET_ID, 'DCC');
+    launchApp();
   }
   function launchApp() {
     document.getElementById('operationName').textContent=operationName;
@@ -1544,4 +1546,3 @@
 </script>
 </body>
 </html>
-
