@@ -1073,13 +1073,28 @@
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
       body: JSON.stringify({ tag_epc: record.tag, herdmate_sheet_id: DCC_SHEET_ID })
     })
-    .then(function(r){ return r.json(); })
-    .then(function(data){
-      record.animal = data.found ? data.animal : null;
-      renderTable();
+    .then(function(r){
+      if (!r.ok) {
+        // Server rejected the request — this is NOT the same as "no match".
+        // Surface the real reason instead of hiding it behind a generic result.
+        return r.json().catch(function(){ return {}; }).then(function(errBody){
+          var reason = (errBody && errBody.detail) ? errBody.detail : ('HTTP ' + r.status);
+          record.animal = null;
+          record.animalLookupError = reason;
+          renderTable();
+          throw new Error('handled'); // stop the chain, already handled
+        });
+      }
+      return r.json().then(function(data){
+        record.animal = data.found ? data.animal : null;
+        record.animalLookupError = null;
+        renderTable();
+      });
     })
-    .catch(function(){
-      record.animal = null; // treat lookup failure same as no-match, don't block scanning
+    .catch(function(err){
+      if (err && err.message === 'handled') return; // already surfaced above
+      record.animal = null;
+      record.animalLookupError = 'Network error — could not reach lookup server';
       renderTable();
     });
   }
@@ -1238,7 +1253,7 @@
         :(r.firstGPS?'<span class="gps-line" style="color:#555">⏳ fetching weather...</span>':'');
       var syncHtml=r.synced===null?'<span style="color:var(--orange);font-size:.8rem">⏳</span>':r.synced?'<span style="color:var(--green);font-size:.8rem">✅</span>':'<span style="color:var(--red);font-size:.75rem">⚠️</span>';
       var animalHtml=r.animal===undefined?'<span style="color:var(--muted);font-size:.75rem">⏳ checking DCC...</span>'
-        :r.animal===null?'<span style="color:var(--muted);font-size:.75rem">❔ no DCC match</span>'
+        :r.animal===null?(r.animalLookupError?'<span style="color:var(--red);font-size:.72rem">⚠️ lookup error: '+esc(r.animalLookupError)+'</span>':'<span style="color:var(--muted);font-size:.75rem">❔ no DCC match</span>')
         :'<span style="color:var(--green);font-size:.78rem;text-decoration:underline">🐄 '+esc(r.animal.tag||'')+' — tap for record</span>';
       rows+='<tr class="'+(i===0?'flash':'')+'" onclick="showAnimalModal(\''+esc(k).replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\')" style="cursor:pointer"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'<br>'+animalHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
     });
