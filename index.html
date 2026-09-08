@@ -614,6 +614,10 @@
     if (type==='scan') { audioScanOn=!audioScanOn; var b=document.getElementById('audioScanBtn'); b.textContent=(audioScanOn?'🔊':'🔇')+' Scan Tick'; b.className='audio-btn'+(audioScanOn?' on':''); getAudioCtx(); }
     else if (type==='alert') { audioAlertOn=!audioAlertOn; var b2=document.getElementById('audioAlertBtn'); b2.textContent=(audioAlertOn?'🔊':'🔇')+' Alert'; b2.className='audio-btn'+(audioAlertOn?' on':''); getAudioCtx(); }
     else if (type==='vib') { vibOn=!vibOn; var b3=document.getElementById('vibBtn'); b3.textContent=(vibOn?'📳':'📴')+' Vibrate'; b3.className='audio-btn vib'+(vibOn?' on':''); }
+    // These buttons sit above both HC and BB screens — tapping any of them
+    // steals focus from the scanner input the same way the mode tabs did.
+    if (currentMode==='bb') { document.getElementById('bbScanInput').focus(); }
+    else if (!document.getElementById('tagInput').disabled) { document.getElementById('tagInput').focus(); }
   };
 
   // ── BLE R6 CONNECTION ──
@@ -817,6 +821,14 @@
     document.getElementById('tabBB').className='mode-tab'+(mode==='bb'?' active-bb':'');
     document.getElementById('hcMode').style.display=mode==='hc'?'block':'none';
     document.getElementById('bbMode').style.display=mode==='bb'?'flex':'none';
+    // The C72 scanner types into whatever input has focus (keyboard-wedge).
+    // Without this, switching to Bovine Beacon left the scanner pointed at
+    // nothing — the tab looked active but physical scans went nowhere.
+    if (mode==='bb') {
+      document.getElementById('bbScanInput').focus();
+    } else if (!document.getElementById('tagInput').disabled) {
+      document.getElementById('tagInput').focus();
+    }
   };
 
   // GPS
@@ -1096,6 +1108,10 @@
       ['Dam', a.dam || a.dam_tag], ['Sire', a.sire],
       ['Pasture', a.pasture], ['Status', a.status],
       ['Weight', a.weight || a.birth_weight], ['BCS', a.bcs || a.dam_bcs],
+      ['Due date', a.due_date], ['Palp. result', a.palp_result], ['Months preg.', a.months_preg],
+      ['Disposition', a.disposition],
+      ['Calving season', a.season], ['Assisted', a.assisted], ['Twin', a.is_twin],
+      ['Udder condition', a.udder], ['GPS', a.gps], ['Tagged by', a.tagger],
       ['Notes', a.notes]
     ].filter(function(p){ return p[1]; });
     var body = rows.map(function(p){ return '<div style="margin:4px 0;font-size:.85rem"><b>'+esc(p[0])+':</b> '+esc(p[1])+'</div>'; }).join('');
@@ -1110,6 +1126,8 @@
   window.closeAnimalModal = function() {
     var el = document.getElementById('animalModalOverlay');
     if (el) el.remove();
+    if (currentMode==='bb') { document.getElementById('bbScanInput').focus(); }
+    else if (!document.getElementById('tagInput').disabled) { document.getElementById('tagInput').focus(); }
   };
 
   function updateHeadcountBanner(){
@@ -1135,7 +1153,7 @@
     if(e.key==='Enter'){e.preventDefault();var v=document.getElementById('bbScanInput').value.trim().toUpperCase();document.getElementById('bbScanInput').value='';if(v)processBBScan(v);}
   });
 
-  window.setBBPasture=function(){bbPasture=document.getElementById('bbPastureInput').value.trim();if(!bbPasture){showToast('Enter pasture',true);return;}showToast('BB Pasture: '+bbPasture);};
+  window.setBBPasture=function(){bbPasture=document.getElementById('bbPastureInput').value.trim();if(!bbPasture){showToast('Enter pasture',true);return;}showToast('BB Pasture: '+bbPasture);document.getElementById('bbScanInput').focus();};
   window.setBeaconTarget=function(){
     var t=document.getElementById('bbTagInput').value.trim().toUpperCase();
     if(!t){showToast('Enter a tag to find',true);return;}
@@ -1151,6 +1169,7 @@
     renderBBTable();
     showToast('Bovine Beacon active','blue');
     if (vibOn) startJawsHaptics();
+    document.getElementById('bbScanInput').focus(); // tapping HUNT steals focus from the scanner input — reclaim it
   };
 
   function processBBScan(raw){
@@ -1227,7 +1246,7 @@
       var animalHtml=r.animal===undefined?'<span style="color:var(--muted);font-size:.75rem">⏳ checking DCC...</span>'
         :r.animal===null?'<span style="color:var(--muted);font-size:.75rem">❔ no DCC match</span>'
         :'<span style="color:var(--green);font-size:.78rem;text-decoration:underline">🐄 '+esc(r.animal.tag||'')+' — tap for record</span>';
-      rows+='<tr class="'+(i===0?'flash':'')+'" onclick="showAnimalModal(\''+esc(k).replace(/'/g,"\\'")+'\')" style="cursor:pointer"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'<br>'+animalHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
+      rows+='<tr class="'+(i===0?'flash':'')+'" onclick="showAnimalModal(\''+esc(k).replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\')" style="cursor:pointer"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'<br>'+animalHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
     });
     tbody.innerHTML=rows;
   }
@@ -1474,6 +1493,8 @@
   window.closePastureManager = function() {
     var el = document.getElementById('pastureManagerModal');
     if (el) el.remove();
+    if (currentMode==='bb') { document.getElementById('bbScanInput').focus(); }
+    else if (!document.getElementById('tagInput').disabled) { document.getElementById('tagInput').focus(); }
   };
 
   // INIT
@@ -1523,3 +1544,4 @@
 </script>
 </body>
 </html>
+
