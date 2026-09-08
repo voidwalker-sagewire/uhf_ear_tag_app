@@ -474,6 +474,7 @@
   var sessionId = null; // one per app launch, shared across every scan that session
   var signedInEmail = localStorage.getItem('hm_user_email') || ''; // for the real sheet's "Logged By" column
   function newHCID(){ return 'H-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7).toUpperCase(); }
+  function newBeaconID(){ return 'B-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7).toUpperCase(); }
   // Matches the REAL Head Count tab exactly: HCID, Session, Date, Tag EPC,
   // Pasture, First Seen, Latitude, Longitude, GPS Accuracy (m), Read Count,
   // Mode, Operation, Logged By — 13 columns, A:M. No weather columns; the
@@ -486,6 +487,16 @@
       record.firstGPS?record.firstGPS.lng:'',
       record.firstGPS?record.firstGPS.acc:'',
       record.readCount, 'Head Count', operationName, signedInEmail
+    ]];
+  }
+  // Matches the REAL Bovine Beacon Log tab exactly: BEACONID, Date, Time,
+  // Tag EPC, Target Tag, Pasture, Found, Latitude, Longitude, Operation.
+  function beaconRow(record, targetTag){
+    return [[
+      newBeaconID(), record.date, record.time, record.tag, targetTag||'',
+      record.pasture, record.isTarget?'YES':'NO',
+      record.gps?record.gps.lat:'', record.gps?record.gps.lng:'',
+      operationName
     ]];
   }
   var tokenClient = null;
@@ -518,11 +529,11 @@
       var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
       var row;
       if(mode==='Bovine Beacon'){
-        row=[[record.date,record.time,record.tag,record.targetTag||'',record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
+        row=beaconRow(record, record.targetTag);
       } else {
         row=headCountRow(record);
       }
-      fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:M/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+      fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+(tab==='Head Count'?'!A:M':'!A:J')+'/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
         method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
       }).then(function(r){
         if(r.ok){
@@ -955,11 +966,11 @@
     var tab=mode==='Bovine Beacon'?'Bovine Beacon Log':'Head Count';
     var row;
     if(mode==='Bovine Beacon'){
-      row=[[record.date,record.time,record.tag,bbTarget,record.pasture,record.isTarget?'YES':'NO',record.gps?record.gps.lat:'',record.gps?record.gps.lng:'',operationName]];
+      row=beaconRow(record, bbTarget);
     } else {
       row=headCountRow(record);
     }
-    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+'!A:M/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+(tab==='Head Count'?'!A:M':'!A:J')+'/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     }).then(function(r){
       if(r.ok){
