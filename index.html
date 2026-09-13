@@ -553,11 +553,7 @@
             setSheetsBar('err','❌ Not syncing ('+reason+') — '+n+' saved on device (tap 🔄 to retry)');
           });
         }
-      }).catch(function(err){
-        var n=queueLoad().length;
-        console.error('Sheets append network error', err);
-        setSheetsBar('err','❌ Offline — '+n+' saved on device');
-      });
+      }).catch(function(err){ var n=queueLoad().length; console.error('Sheets append network error', err); setSheetsBar('err','❌ Offline (' + (err && err.message ? err.message : 'unknown error') + ') — '+n+' saved on device'); });
     }
     processNext();
   }
@@ -1006,12 +1002,7 @@
           setSheetsBar('err','❌ Sync failed ('+reason+') — saved offline');
         });
       }
-    }).catch(function(err){
-      if(record.synced!==undefined){record.synced=false;renderTable();}
-      queueAdd(record,mode);
-      console.error('Sheets append network error', err);
-      setSheetsBar('err','❌ Offline — saved to device');
-    });
+    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append network error', err); setSheetsBar('err','❌ Offline (' + (err && err.message ? err.message : 'unknown error') + ') — saved to device'); });
   }
 
   // updateSheetWeather removed: the real sheet has no weather columns, and
