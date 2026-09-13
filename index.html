@@ -456,6 +456,7 @@
   var DCC_SHEET_ID = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI'; // DCC Ranch/Calf Tracker — safe to hardcode now the server checks your Google sign-in, not this ID
   var LOOKUP_API = 'https://dave.sagewire.dev/vet/lookup_animal';
   var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file';
+  var AUTH_SERVER = 'https://scout-auth.herdmate.ag';
   var YEAR = new Date().getFullYear();
 
   // Nordic UART Service UUIDs
@@ -881,7 +882,7 @@
   window.retryGPS=function(){startGPS();};
 
   // AUTH
-  window.signIn=function(){if(tokenClient)tokenClient.requestAccessToken({prompt:''});else showToast('Loading...');};
+  window.signIn=function(){ var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' + '?client_id=' + encodeURIComponent(CLIENT_ID) + '&redirect_uri=' + encodeURIComponent(window.location.origin + window.location.pathname) + '&response_type=code' + '&scope=' + encodeURIComponent(SCOPES) + '&access_type=offline' + '&prompt=consent'; window.location.href = authUrl; }; function exchangeCodeForToken(code) { fetch(AUTH_SERVER + '/scout/auth/exchange', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: code}) }).then(function(r) { if (!r.ok) return r.json().then(function(e){ throw new Error(e.detail || 'Sign in failed'); }); return r.json(); }).then(function(data) { accessToken = data.access_token; signedInEmail = data.email; localStorage.setItem('hm_google_token', data.access_token); localStorage.setItem('hm_google_token_time', Date.now().toString()); localStorage.setItem('hm_user_email', data.email); var cleanUrl = window.location.origin + window.location.pathname; window.history.replaceState({}, document.title, cleanUrl); onSignedIn(); }).catch(function(err) { showToast('Sign in failed: ' + err.message, true); }); } function silentRefresh(email) { return fetch(AUTH_SERVER + '/scout/auth/refresh', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email: email}) }).then(function(r) { if (!r.ok) throw new Error('refresh failed'); return r.json(); }).then(function(data) { accessToken = data.access_token; signedInEmail = data.email; localStorage.setItem('hm_google_token', data.access_token); localStorage.setItem('hm_google_token_time', Date.now().toString()); onSignedIn(); return true; }).catch(function() { return false; }); } // Runs immediately when the page loads. (function checkAuthOnLoad() { var params = new URLSearchParams(window.location.search); var code = params.get('code'); if (code) { exchangeCodeForToken(code); return; } var savedEmail = localStorage.getItem('hm_user_email'); if (savedEmail) { silentRefresh(savedEmail); } })();
   window.openMySheet=function(){
     if(!sheetId){showToast('No sheet connected yet',true);return;}
     window.open('https://docs.google.com/spreadsheets/d/'+sheetId+'/edit','_blank');
