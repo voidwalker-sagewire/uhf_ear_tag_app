@@ -1078,40 +1078,79 @@
     }
   }
 
-  // ── DCC ANIMAL LOOKUP ──
-  // record.animal states: undefined = not looked up yet, null = looked up but no match, {..} = matched record
-  function lookupAnimal(key, record) {
-    if (!DCC_SHEET_ID || !accessToken) { record.animal = null; return; } // not signed in yet — skip silently
-    fetch(LOOKUP_API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + accessToken },
-      body: JSON.stringify({ tag_epc: record.tag, herdmate_sheet_id: DCC_SHEET_ID })
-    })
-    .then(function(r){
-      if (!r.ok) {
-        // Server rejected the request — this is NOT the same as "no match".
-        // Surface the real reason instead of hiding it behind a generic result.
-        return r.json().catch(function(){ return {}; }).then(function(errBody){
-          var reason = (errBody && errBody.detail) ? errBody.detail : ('HTTP ' + r.status);
-          record.animal = null;
-          record.animalLookupError = reason;
-          renderTable();
-          throw new Error('handled'); // stop the chain, already handled
-        });
-      }
-      return r.json().then(function(data){
-        record.animal = data.found ? data.animal : null;
-        record.animalLookupError = null;
-        renderTable();
+  // ── DCC ANIMAL LOOKUP — INDEPENDENT, reads the Sheet directly ──
+  // No call to Dave's API. Uses Scout's own OAuth accessToken (already
+  // granted spreadsheets scope at sign-in) to read the SAME sheet Scout
+  // writes to. Checks Calf Tracker first, then Ranch Tracker — matching
+  // either the printed tag number OR the UHF EPC column, same as Dave's
+  // original working lookup logic.
+  var animalRecordsCache = null; // fetched once per session, not per-scan
+
+  function loadTab(tabName) {
+    var range = encodeURIComponent(tabName) + '!A:BZ';
+    return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
+      headers: { 'Authorization': 'Bearer ' + accessToken }
+    }).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' reading ' + tabName);
+      return r.json();
+    }).then(function(data) {
+      var rows = data.values || [];
+      if (rows.length < 2) return [];
+      var headers = rows[0];
+      return rows.slice(1).map(function(row) {
+        var obj = {};
+        headers.forEach(function(h, i) { obj[h] = row[i] || ''; });
+        return obj;
       });
-    })
-    .catch(function(err){
-      if (err && err.message === 'handled') return; // already surfaced above
+    });
+  }
+
+  function loadAnimalRecords() {
+    if (animalRecordsCache) return Promise.resolve(animalRecordsCache);
+    return Promise.all([
+      loadTab('Calf Tracker').then(function(rows) {
+        return rows.map(function(r) {
+          return {
+            source: 'Calf Tracker', tag: (r['Calf Tag'] || '').trim(), uhf: (r['UHF#'] || '').trim(),
+            date: r['Date'] || '', color: r['Calf Color'] || '', sex: r['Calf Sex'] || '',
+            type: r['Calf Type'] || '', dam_tag: r['Cow Tag'] || '', status: r['Status'] || '',
+            notes: r['Calving Notes'] || ''
+          };
+        });
+      }),
+      loadTab('Ranch Tracker').then(function(rows) {
+        return rows.map(function(r) {
+          return {
+            source: 'Ranch Tracker', tag: (r['Tag #'] || '').trim(), uhf: (r['UHF#'] || '').trim(),
+            sex: r['Sex'] || '', breed: r['Breed'] || '', color: r['Color'] || '',
+            birth_date: (r['Birth Date'] || '').slice(0, 10), age: r['Age'] || '',
+            pasture: r['Pasture'] || '', status: r['Status'] || '', weight: r['Weight'] || '',
+            dam: r['Dam #'] || '', sire: r['Sire #'] || ''
+          };
+        });
+      })
+    ]).then(function(results) {
+      animalRecordsCache = results[0].concat(results[1]);
+      return animalRecordsCache;
+    });
+  }
+
+  function lookupAnimal(key, record) {
+    if (!DCC_SHEET_ID || !accessToken) { record.animal = null; return; }
+    loadAnimalRecords().then(function(records) {
+      var match = records.filter(function(r) {
+        return r.tag === record.tag || (r.uhf && r.uhf === record.tag);
+      })[0];
+      record.animal = match || null;
+      record.animalLookupError = null;
+      renderTable();
+    }).catch(function(err) {
       record.animal = null;
-      record.animalLookupError = 'Network error — could not reach lookup server';
+      record.animalLookupError = err.message || 'Could not read animal records from Sheet';
       renderTable();
     });
   }
+
 
   window.showAnimalModal = function(key) {
     var r = uniqueTags[key];
