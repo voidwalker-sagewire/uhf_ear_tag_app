@@ -1595,8 +1595,12 @@
             onSignedIn();
           }
         });
-        // Show login
-        showScreen('loginScreen');
+        // Show login — but only if we're not already signed in. Our new
+        // silent sign-in logic runs first; without this check, this old
+        // code was overriding a successful sign-in every time.
+        if (!accessToken) {
+          showScreen('loginScreen');
+        }
       }
     },200);
   });
