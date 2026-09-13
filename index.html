@@ -522,7 +522,7 @@
   function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
 
   function flushOfflineQueue() {
-    if(!accessToken||!sheetId) return;
+    if(!accessToken) return;
     function processNext() {
       var q=queueLoad();
       if(!q.length){setSheetsBar('ok','✅ All data synced — '+operationName);return;}
@@ -534,8 +534,7 @@
       } else {
         row=headCountRow(record);
       }
-      fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+(tab==='Head Count'?'!A:M':'!A:J')+'/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
-        method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
+      fetch('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values/'+encodeURIComponent(tab)+(tab==='Head Count'?'!A:M':'!A:J')+'/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       }).then(function(r){
         if(r.ok){
           queueRemove(0);
@@ -896,7 +895,7 @@
   }
 })();
   window.openMySheet=function(){
-    if(!sheetId){showToast('No sheet connected yet',true);return;}
+    if(!DCC_SHEET_ID){showToast('No sheet connected yet',true);return;}
     window.open('https://docs.google.com/spreadsheets/d/'+sheetId+'/edit','_blank');
   };
   window.signOut=function(){
@@ -952,7 +951,7 @@
       setStep('stepCreate','done','✅ Google Sheet created');
       setStep('stepTab','done','✅ Tabs created');
       setStep('stepHeaders','active','⏳ Writing column headers...');
-      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values:batchUpdate',{
+      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values:batchUpdate',{
         method:'POST',
         headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -990,7 +989,7 @@
     } else {
       row=headCountRow(record);
     }
-    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(tab)+(tab==='Head Count'?'!A:M':'!A:J')+'/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values/'+encodeURIComponent(tab)+(tab==='Head Count'?'!A:M':'!A:J')+'/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     }).then(function(r){
       if(r.ok){
