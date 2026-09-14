@@ -1,9 +1,89 @@
-Write Test body { font-family: monospace; background: #111; color: #eee; padding: 16px; font-size: 14px; } button { padding: 16px; font-size: 18px; width: 100%; margin: 8px 0; } #out { white-space: pre-wrap; background: #000; border: 1px solid #444; padding: 12px; margin-top: 12px; border-radius: 6px; min-height: 100px; } 
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Write Test</title>
+<style>
+  body { font-family: monospace; background: #111; color: #eee; padding: 16px; font-size: 14px; }
+  button { padding: 16px; font-size: 18px; width: 100%; margin: 8px 0; }
+  #out { white-space: pre-wrap; background: #000; border: 1px solid #444; padding: 12px; margin-top: 12px; border-radius: 6px; min-height: 100px; }
+</style>
+</head>
+<body>
 
-Sheets Write Test
+<h2>Sheets Write Test</h2>
+<button id="signinBtn">1. Sign in with Google</button>
+<button id="writeBtn">2. Attempt ONE test write</button>
+<div id="out">Nothing yet.</div>
 
-1. Sign in with Google 2. Attempt ONE test write 
+<script>
+var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
+var AUTH_SERVER = 'https://scout-auth.herdmate.ag';
+var SHEET_ID = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI';
+var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email';
 
-Nothing yet.
+var accessToken = null;
+var out = document.getElementById('out');
 
-var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com'; var AUTH_SERVER = 'https://scout-auth.herdmate.ag'; var SHEET_ID = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI'; var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email'; var accessToken = null; var out = document.getElementById('out'); function log(msg) { out.textContent += '\n' + msg; } document.getElementById('signinBtn').onclick = function() { var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' + '?client_id=' + encodeURIComponent(CLIENT_ID) + '&redirect_uri=' + encodeURIComponent(window.location.origin + window.location.pathname) + '&response_type=code' + '&scope=' + encodeURIComponent(SCOPES) + '&access_type=offline' + '&prompt=consent'; window.location.href = authUrl; }; document.getElementById('writeBtn').onclick = function() { if (!accessToken) { out.textContent = 'Not signed in yet — hit button 1 first.'; return; } out.textContent = 'Attempting write...'; var testRow = [['TEST', new Date().toString(), 'isolated-test-page']]; fetch('https://sheets.googleapis.com/v4/spreadsheets/' + SHEET_ID + '/values/Head%20Count!A:M/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', { method: 'POST', headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' }, body: JSON.stringify({ values: testRow }) }).then(function(r) { log('HTTP status: ' + r.status); return r.text(); }).then(function(body) { log('Response body: ' + body); }).catch(function(err) { log('CAUGHT ERROR — name: ' + err.name); log('CAUGHT ERROR — message: ' + err.message); log('CAUGHT ERROR — full: ' + err.toString()); }); }; // Handle the redirect back from Google var params = new URLSearchParams(window.location.search); var code = params.get('code'); if (code) { out.textContent = 'Got code, exchanging for token...'; fetch(AUTH_SERVER + '/scout/auth/exchange', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: code }) }).then(function(r) { return r.json(); }) .then(function(data) { accessToken = data.access_token; out.textContent = 'Signed in as: ' + data.email + '\nToken (first 20 chars): ' + accessToken.substring(0,20) + '...'; window.history.replaceState({}, document.title, window.location.origin + window.location.pathname); }).catch(function(err) { out.textContent = 'Exchange failed: ' + err.message; }); } 
+function log(msg) {
+  out.textContent += '\n' + msg;
+}
+
+document.getElementById('signinBtn').onclick = function() {
+  var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth'
+    + '?client_id=' + encodeURIComponent(CLIENT_ID)
+    + '&redirect_uri=' + encodeURIComponent(window.location.origin + window.location.pathname)
+    + '&response_type=code'
+    + '&scope=' + encodeURIComponent(SCOPES)
+    + '&access_type=offline'
+    + '&prompt=consent';
+  window.location.href = authUrl;
+};
+
+document.getElementById('writeBtn').onclick = function() {
+  if (!accessToken) {
+    out.textContent = 'Not signed in yet — hit button 1 first.';
+    return;
+  }
+  out.textContent = 'Attempting write...';
+  var testRow = [['TEST', new Date().toString(), 'isolated-test-page']];
+
+  fetch('https://sheets.googleapis.com/v4/spreadsheets/' + SHEET_ID + '/values/Head%20Count!A:M/append?valueInputOption=RAW&insertDataOption=INSERT_ROWS', {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: testRow })
+  }).then(function(r) {
+    log('HTTP status: ' + r.status);
+    return r.text();
+  }).then(function(body) {
+    log('Response body: ' + body);
+  }).catch(function(err) {
+    log('CAUGHT ERROR — name: ' + err.name);
+    log('CAUGHT ERROR — message: ' + err.message);
+    log('CAUGHT ERROR — full: ' + err.toString());
+  });
+};
+
+// Handle the redirect back from Google
+var params = new URLSearchParams(window.location.search);
+var code = params.get('code');
+if (code) {
+  out.textContent = 'Got code, exchanging for token...';
+  fetch(AUTH_SERVER + '/scout/auth/exchange', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: code })
+  }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      accessToken = data.access_token;
+      out.textContent = 'Signed in as: ' + data.email + '\nToken (first 20 chars): ' + accessToken.substring(0,20) + '...';
+      window.history.replaceState({}, document.title, window.location.origin + window.location.pathname);
+    }).catch(function(err) {
+      out.textContent = 'Exchange failed: ' + err.message;
+    });
+}
+</script>
+
+</body>
+</html>
