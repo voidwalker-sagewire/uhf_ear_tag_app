@@ -534,8 +534,24 @@
       } else {
         row=headCountRow(record);
       }
-      fetch('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values/'+encodeURIComponent(tab)+(tab==='HeadCount'?'!A:M':'!A:J')+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
-      }).then(function(r){
+      fetch(
+      'https://sheets.googleapis.com/v4/spreadsheets/' +
+        DCC_SHEET_ID +
+        '/values/' +
+        encodeURIComponent(tab) +
+        (tab === 'HeadCount' ? '!A:M' : '!A:J') +
+        ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
+        {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer ' + accessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          values: row
+        })
+      }
+    ).then(function(r) {
         if(r.ok){
           queueRemove(0);
           var key=record.tag+'__'+record.pasture;
