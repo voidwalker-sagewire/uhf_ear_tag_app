@@ -226,7 +226,8 @@ def find_animal(sheet_id: str, tag_identifier: str):
 
     # ── SEARCH RANCH TRACKER ──
     try:
-        ranch_data = sheets_get(token, sheet_id, "Ranch Tracker!A:BZ")
+        # UHF# is around column CJ in the live Ranch Tracker schema, beyond BZ.
+        ranch_data = sheets_get(token, sheet_id, "Ranch Tracker!A:DA")
         if ranch_data and len(ranch_data) > 1:
             headers = ranch_data[0]
             for row in ranch_data[1:]:
