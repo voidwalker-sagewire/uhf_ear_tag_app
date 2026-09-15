@@ -1106,7 +1106,9 @@
   var animalRecordsCache = null; // fetched once per session, not per-scan
 
   function loadTab(tabName) {
-    var range = encodeURIComponent(tabName) + '!A:BZ';
+    // Ranch Tracker's UHF# column is CJ, beyond the old BZ cutoff.
+    var lastColumn = tabName === 'Ranch Tracker' ? 'DA' : 'BZ';
+    var range = encodeURIComponent(tabName) + '!A:' + lastColumn;
     return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
     }).then(function(r) {
