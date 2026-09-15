@@ -1106,9 +1106,7 @@
   var animalRecordsCache = null; // fetched once per session, not per-scan
 
   function loadTab(tabName) {
-    // Ranch Tracker's UHF# column is CJ, beyond the old BZ cutoff.
-    var lastColumn = tabName === 'Ranch Tracker' ? 'DA' : 'BZ';
-    var range = encodeURIComponent(tabName) + '!A:' + lastColumn;
+    var range = encodeURIComponent(tabName) + '!A:BZ';
     return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
     }).then(function(r) {
@@ -1126,6 +1124,62 @@
     });
   }
 
+  // Ranch Tracker has more than 50,000 grid rows and its UHF# field is in CJ.
+  // Fetching A:DA as one block is unnecessarily large and can fail in the
+  // browser. Request only the columns used by the animal card, then join them
+  // back together by their shared row number.
+  function loadRanchTracker() {
+    var ranges = [
+      'Ranch Tracker!A:C',
+      'Ranch Tracker!G:U',
+      'Ranch Tracker!W:W',
+      'Ranch Tracker!Y:Y',
+      'Ranch Tracker!CJ:CJ'
+    ];
+    var query = ranges.map(function(range) {
+      return 'ranges=' + encodeURIComponent(range);
+    }).join('&');
+    return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values:batchGet?' + query, {
+      headers: { 'Authorization': 'Bearer ' + accessToken }
+    }).then(function(r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' reading Ranch Tracker');
+      return r.json();
+    }).then(function(data) {
+      var blocks = (data.valueRanges || []).map(function(block) { return block.values || []; });
+      if (blocks.length !== ranges.length) throw new Error('Incomplete Ranch Tracker response');
+      var rowCount = blocks.reduce(function(max, block) { return Math.max(max, block.length); }, 0);
+      function value(blockIndex, rowIndex, columnIndex) {
+        var row = blocks[blockIndex][rowIndex] || [];
+        return String(row[columnIndex] == null ? '' : row[columnIndex]).trim();
+      }
+      var records = [];
+      for (var i = 1; i < rowCount; i++) {
+        var tag = value(0, i, 2);
+        var uhf = value(4, i, 0);
+        if (!tag && !uhf) continue;
+        records.push({
+          source: 'Ranch Tracker',
+          display_id: value(0, i, 1),
+          tag: tag,
+          uhf: uhf,
+          pasture: value(1, i, 0),
+          breed: value(1, i, 2),
+          sex: value(1, i, 3),
+          type: value(1, i, 4),
+          birth_date: value(1, i, 5).slice(0, 10),
+          color: value(1, i, 6),
+          age: value(1, i, 8),
+          weight: value(1, i, 12),
+          dam: value(1, i, 13),
+          sire: value(1, i, 14),
+          status: value(2, i, 0),
+          notes: value(3, i, 0)
+        });
+      }
+      return records;
+    });
+  }
+
   function loadAnimalRecords() {
     if (animalRecordsCache) return Promise.resolve(animalRecordsCache);
     return Promise.all([
@@ -1139,17 +1193,7 @@
           };
         });
       }),
-      loadTab('Ranch Tracker').then(function(rows) {
-        return rows.map(function(r) {
-          return {
-            source: 'Ranch Tracker', tag: (r['Tag #'] || '').trim(), uhf: (r['UHF#'] || '').trim(),
-            sex: r['Sex'] || '', breed: r['Breed'] || '', color: r['Color'] || '',
-            birth_date: (r['Birth Date'] || '').slice(0, 10), age: r['Age'] || '',
-            pasture: r['Pasture'] || '', status: r['Status'] || '', weight: r['Weight'] || '',
-            dam: r['Dam #'] || '', sire: r['Sire #'] || ''
-          };
-        });
-      })
+      loadRanchTracker()
     ]).then(function(results) {
       animalRecordsCache = results[0].concat(results[1]);
       return animalRecordsCache;
