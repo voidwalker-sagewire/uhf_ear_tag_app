@@ -69,6 +69,14 @@
   .mode-btn { background:var(--panel2); border:1px solid var(--border); border-radius:50%; width:44px; height:44px; font-size:1.1rem; cursor:pointer; display:flex; align-items:center; justify-content:center; }
   .hdr-menu { background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:6px 12px; font-size:0.75rem; color:var(--muted); cursor:pointer; min-height:36px; font-family:'Source Sans 3',sans-serif; }
   .hdr-menu:hover { border-color:var(--orange); color:var(--orange); }
+  @media (max-width:520px) {
+    header { padding:7px 9px; gap:7px; }
+    .logo-svg { width:38px; height:38px; }
+    .brand-text { font-size:1.28rem; letter-spacing:.5px; }
+    .brand-sub { font-size:.52rem; letter-spacing:1.2px; max-width:118px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .hdr-right { gap:4px; }
+    .mode-btn { width:38px; height:38px; font-size:1rem; }
+  }
 
   /* STATUS BARS */
   .status-bar { padding:7px 14px; display:flex; align-items:center; gap:8px; font-size:0.75rem; font-weight:600; }
@@ -218,7 +226,7 @@
   .del-pasture { background:none; border:none; color:var(--muted); cursor:pointer; font-size:1rem; padding:4px 6px; border-radius:4px; }
   .del-pasture:hover { color:var(--red); }
 
-  .toast { position:fixed; bottom:140px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 20px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.9rem; font-weight:600; transition:transform .25s ease; z-index:999; pointer-events:none; white-space:nowrap; max-width:90vw; text-align:center; }
+  .toast { position:fixed; bottom:84px; left:50%; transform:translateX(-50%) translateY(60px); background:#000; border:2px solid var(--orange); color:var(--orange); padding:10px 16px; border-radius:8px; font-family:'Oswald',sans-serif; font-size:.86rem; font-weight:600; transition:transform .2s ease; z-index:999; pointer-events:auto; cursor:pointer; white-space:normal; width:max-content; max-width:calc(100vw - 28px); text-align:center; box-shadow:0 4px 18px rgba(0,0,0,.55); }
   .toast.show { transform:translateX(-50%) translateY(0); }
   .toast.warn { border-color:var(--red); color:var(--red); }
   .toast.good { border-color:var(--green); color:var(--green); }
@@ -324,13 +332,11 @@
     <div class="hdr-right">
       <button class="mode-btn" id="lockBtn" onclick="toggleRotation()" title="Lock screen rotation">🔄</button>
       <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
-      <button class="hdr-menu" id="openSheetBtn" onclick="openMySheet()" title="Open the Google Sheet this device is synced to">📄 Sheet</button>
-      <button class="hdr-menu" onclick="showDebugLog()" title="Open device diagnostic log">🧰 Log</button>
-      <button class="hdr-menu" onclick="signOut()">Sign Out</button>
+      <button class="mode-btn" onclick="showHeaderMenu()" title="More options" aria-label="More options">⋮</button>
     </div>
   </header>
 
-  <div class="status-bar sheets-pending" id="sheetsBar">⏳ Connecting...</div>
+  <div class="status-bar sheets-pending" id="sheetsBar" onclick="openStatusDetails()">⏳ Connecting...</div>
   <div class="status-bar gps-searching" id="gpsBar" onclick="retryGPS()">📡 Acquiring GPS...</div>
   <!-- BLE STATUS BAR — tap to connect R6 -->
   <div class="status-bar ble-disconnected" id="bleBar" onclick="connectR6()">📶 Tap to connect R6 scanner</div>
@@ -449,7 +455,18 @@
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="toast" id="toast" role="status" onclick="hideToast()"></div>
+
+<div class="modal-overlay" id="headerMenuOverlay" style="display:none;align-items:flex-end;" onclick="if(event.target===this)hideHeaderMenu()">
+  <div class="modal-sheet">
+    <div class="modal-title">SCOUT</div>
+    <div class="modal-desc">Device and account options</div>
+    <button class="modal-save-btn" onclick="hideHeaderMenu();openMySheet()">📄 Open DCC Sheet</button>
+    <button class="modal-add-btn" onclick="hideHeaderMenu();showDebugLog()">🧰 Device Log</button>
+    <button class="modal-add-btn" style="color:var(--red);border-color:var(--red);" onclick="hideHeaderMenu();signOut()">Sign Out</button>
+    <button class="hdr-menu" style="width:100%;margin-top:10px;" onclick="hideHeaderMenu()">Cancel</button>
+  </div>
+</div>
 
 <div class="modal-overlay" id="systemDebugOverlay" style="display:none;align-items:flex-end;">
   <div class="modal-sheet" style="max-height:88vh;">
@@ -551,6 +568,9 @@
   }
   window.showDebugLog=function(){document.getElementById('systemDebugText').textContent=formatDebugLog();document.getElementById('systemDebugOverlay').style.display='flex';};
   window.hideDebugLog=function(){document.getElementById('systemDebugOverlay').style.display='none';};
+  window.showHeaderMenu=function(){document.getElementById('headerMenuOverlay').style.display='flex';};
+  window.hideHeaderMenu=function(){document.getElementById('headerMenuOverlay').style.display='none';};
+  window.openStatusDetails=function(){var el=document.getElementById('sheetsBar');if(el&&el.classList.contains('sheets-err'))showDebugLog();};
   window.clearDebugLog=function(){localStorage.removeItem(DEBUG_KEY);document.getElementById('systemDebugText').textContent='Debug log cleared.';showToast('Debug log cleared');};
   window.copyDebugLog=function(){
     var text=formatDebugLog();
@@ -559,7 +579,7 @@
   };
   function markAuthExpired(context) {
     debugLog('Google authentication rejected', {context:context,queueCount:queueLoad().length}, 'ERROR');
-    setSheetsBar('err','🔐 Google session rejected — scans saved on this device. Open Log for details.');
+    setSheetsBar('err','🔐 Google session rejected — scans saved here. Tap for details.');
   }
 
   // BLE STATE
@@ -624,7 +644,7 @@
             console.error('Sheets append failed', status, body);
             debugLog('Offline sync rejected', {status:status,reason:reason,remaining:n}, 'ERROR');
             if(status===401){markAuthExpired('offline queue');}
-            else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — '+n+' saved. Open Log for details.');}
+            else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — '+n+' saved. Tap for details.');}
           });
         }
       }).catch(function(err){ var n=queueLoad().length; console.error('Sheets append network error', err); debugLog('Offline sync network failure',{message:err&&err.message,remaining:n},'ERROR'); setSheetsBar('err','📴 No network — '+n+' saved on this device.'); });
@@ -1333,8 +1353,16 @@
     var r = uniqueTags[key];
     if (!r) return;
     if (r.animal === undefined) { showToast('Still looking up this tag...'); return; }
-    if (r.animalLookupError) { showToast(r.animalLookupError==='Google session rejected'?'Animal lookup unavailable — Google session rejected':'Animal lookup failed — open Log',true); return; }
-    if (r.animal === null) { showToast('Unlinked UHF tag — no matching animal record for '+r.tag); return; }
+    if (r.animalLookupError) { showDebugLog(); return; }
+    if (r.animal === null) {
+      var missingOverlay=document.createElement('div');
+      missingOverlay.className='modal-overlay';
+      missingOverlay.id='animalModalOverlay';
+      missingOverlay.onclick=function(e){if(e.target===missingOverlay)closeAnimalModal();};
+      missingOverlay.innerHTML='<div class="modal-sheet"><button class="modal-close" onclick="closeAnimalModal()">✕</button><div class="modal-title">Unlinked UHF</div><div class="modal-desc">No Calf Tracker or Ranch Tracker record is linked to this EPC.</div><div style="font-family:monospace;font-size:.9rem;overflow-wrap:anywhere;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">'+esc(r.tag)+'</div><button class="hdr-menu" style="width:100%;margin-top:12px;" onclick="closeAnimalModal()">Close</button></div>';
+      document.body.appendChild(missingOverlay);
+      return;
+    }
     var a = r.animal;
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1484,7 +1512,7 @@
         :(r.firstGPS?'<span class="gps-line" style="color:#555">⏳ fetching weather...</span>':'');
       var syncHtml=r.synced===null?'<span style="color:var(--orange);font-size:.8rem">⏳</span>':r.synced?'<span style="color:var(--green);font-size:.8rem">✅</span>':'<span style="color:var(--red);font-size:.75rem">⚠️</span>';
       var animalHtml=r.animal===undefined?'<span style="color:var(--muted);font-size:.75rem">⏳ checking DCC...</span>'
-        :r.animal===null?(r.animalLookupError?'<span style="color:var(--red);font-size:.72rem">⚠️ lookup error: '+esc(r.animalLookupError)+'</span>':'<span style="color:var(--muted);font-size:.75rem">❔ no DCC match</span>')
+        :r.animal===null?(r.animalLookupError?'<span style="color:var(--red);font-size:.72rem">⚠️ Lookup failed — tap for log</span>':'<span style="color:var(--orange);font-size:.75rem">⚠ Unlinked UHF</span>')
         :'<span style="color:var(--green);font-size:.78rem;text-decoration:underline">🐄 '+esc(r.animal.tag||'')+' — tap for record</span>';
       rows+='<tr class="'+(i===0?'flash':'')+'" onclick="showAnimalModal(\''+esc(k).replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\')" style="cursor:pointer"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'<br>'+animalHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
     });
@@ -1529,8 +1557,10 @@
     t.textContent=msg;
     t.className='toast '+(type==='blue'?'blue':type==='good'?'good':type===true||type==='warn'?'warn':'')+' show';
     clearTimeout(t._timer);
-    t._timer=setTimeout(function(){t.className='toast'+(type==='blue'?' blue':type==='good'?' good':type===true||type==='warn'?' warn':'');},2500);
+    var duration=(type===true||type==='warn')?3200:1500;
+    t._timer=setTimeout(window.hideToast,duration);
   }
+  window.hideToast=function(){var t=document.getElementById('toast');if(!t)return;clearTimeout(t._timer);t.className='toast'+(t.classList.contains('blue')?' blue':t.classList.contains('good')?' good':t.classList.contains('warn')?' warn':'');};
   function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
   // ── WEATHER ──
