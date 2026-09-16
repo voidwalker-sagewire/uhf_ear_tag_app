@@ -325,6 +325,7 @@
       <button class="mode-btn" id="lockBtn" onclick="toggleRotation()" title="Lock screen rotation">🔄</button>
       <button class="mode-btn" id="modeBtn" onclick="toggleMode()">🌙</button>
       <button class="hdr-menu" id="openSheetBtn" onclick="openMySheet()" title="Open the Google Sheet this device is synced to">📄 Sheet</button>
+      <button class="hdr-menu" onclick="showDebugLog()" title="Open device diagnostic log">🧰 Log</button>
       <button class="hdr-menu" onclick="signOut()">Sign Out</button>
     </div>
   </header>
@@ -450,6 +451,21 @@
 
 <div class="toast" id="toast"></div>
 
+<div class="modal-overlay" id="systemDebugOverlay" style="display:none;align-items:flex-end;">
+  <div class="modal-sheet" style="max-height:88vh;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+      <div class="modal-title">Device Debug Log</div>
+      <button class="hdr-menu" onclick="hideDebugLog()">Close</button>
+    </div>
+    <div style="font-size:.72rem;color:var(--muted);margin-bottom:10px;">Last 200 events on this handheld. Google tokens are never recorded.</div>
+    <pre id="systemDebugText" style="white-space:pre-wrap;overflow-wrap:anywhere;background:#050505;border:1px solid var(--border);border-radius:8px;padding:10px;color:#a8d8ff;font-size:.68rem;line-height:1.45;max-height:52vh;overflow-y:auto;"></pre>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;">
+      <button class="hdr-menu" style="width:100%;color:var(--blue);" onclick="copyDebugLog()">Copy Log</button>
+      <button class="hdr-menu" style="width:100%;color:var(--red);" onclick="clearDebugLog()">Clear Log</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
@@ -507,6 +523,44 @@
   var bbTarget = '', bbPasture = '', bbScans = [], bbFound = false, bbActive = false;
   var audioScanOn = false, audioAlertOn = true, vibOn = true, audioCtx = null;
   var lastScanTime = {};
+  var DEBUG_KEY = 'hm_debug_log_v1';
+  var DEBUG_LIMIT = 200;
+
+  function readDebugLog() {
+    try { return JSON.parse(localStorage.getItem(DEBUG_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+  function safeDebugDetails(details) {
+    var text = typeof details === 'string' ? details : JSON.stringify(details || {});
+    return text
+      .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer [REDACTED]')
+      .replace(/("?(?:access_token|refresh_token|authorization|code)"?\s*[:=]\s*)"?[^",\s}]+/gi, '$1[REDACTED]');
+  }
+  function debugLog(eventName, details, level) {
+    var items = readDebugLog();
+    items.push({time:new Date().toISOString(),level:level||'INFO',event:eventName,details:safeDebugDetails(details)});
+    if (items.length > DEBUG_LIMIT) items = items.slice(items.length - DEBUG_LIMIT);
+    try { localStorage.setItem(DEBUG_KEY, JSON.stringify(items)); } catch (e) {}
+    if ((level||'INFO') === 'ERROR') console.error('[HerdMate]', eventName, safeDebugDetails(details));
+    else console.log('[HerdMate]', eventName, safeDebugDetails(details));
+  }
+  function formatDebugLog() {
+    return readDebugLog().map(function(item) {
+      return item.time + ' [' + item.level + '] ' + item.event + (item.details && item.details !== '{}' ? ' — ' + item.details : '');
+    }).join('\n') || 'No diagnostic events recorded yet.';
+  }
+  window.showDebugLog=function(){document.getElementById('systemDebugText').textContent=formatDebugLog();document.getElementById('systemDebugOverlay').style.display='flex';};
+  window.hideDebugLog=function(){document.getElementById('systemDebugOverlay').style.display='none';};
+  window.clearDebugLog=function(){localStorage.removeItem(DEBUG_KEY);document.getElementById('systemDebugText').textContent='Debug log cleared.';showToast('Debug log cleared');};
+  window.copyDebugLog=function(){
+    var text=formatDebugLog();
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){showToast('Debug log copied','good');}).catch(function(){showToast('Could not copy log',true);});}
+    else{showToast('Copy is not available on this device',true);}
+  };
+  function markAuthExpired(context) {
+    debugLog('Google authentication rejected', {context:context,queueCount:queueLoad().length}, 'ERROR');
+    setSheetsBar('err','🔐 Google session rejected — scans saved on this device. Open Log for details.');
+  }
 
   // BLE STATE
   var bleDevice = null;
@@ -526,6 +580,7 @@
     function processNext() {
       var q=queueLoad();
       if(!q.length){setSheetsBar('ok','✅ All data synced — '+operationName);return;}
+      debugLog('Offline queue retry', {remaining:q.length,mode:q[0].mode});
       var item=q[0]; var record=item.record; var mode=item.mode;
       var tab=mode==='Bovine Beacon'?'BovineBeaconLog':'HeadCount';
       var row;
@@ -554,6 +609,7 @@
     ).then(function(r) {
         if(r.ok){
           queueRemove(0);
+          debugLog('Offline record synced', {tag:record.tag,mode:mode,remaining:queueLoad().length});
           var key=record.tag+'__'+record.pasture;
           if(uniqueTags[key]){uniqueTags[key].synced=true;renderTable();}
           var remaining=queueLoad().length;
@@ -566,10 +622,12 @@
             var reason='HTTP '+status;
             try{ var parsed=JSON.parse(body); if(parsed.error&&parsed.error.message){reason=status+': '+parsed.error.message;} }catch(e){}
             console.error('Sheets append failed', status, body);
-            setSheetsBar('err','❌ Not syncing ('+reason+') — '+n+' saved on device (tap 🔄 to retry)');
+            debugLog('Offline sync rejected', {status:status,reason:reason,remaining:n}, 'ERROR');
+            if(status===401){markAuthExpired('offline queue');}
+            else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — '+n+' saved. Open Log for details.');}
           });
         }
-      }).catch(function(err){ var n=queueLoad().length; console.error('Sheets append network error', err); setSheetsBar('err','❌ Offline (' + (err && err.message ? err.message : 'unknown error') + ') — '+n+' saved on device'); });
+      }).catch(function(err){ var n=queueLoad().length; console.error('Sheets append network error', err); debugLog('Offline sync network failure',{message:err&&err.message,remaining:n},'ERROR'); setSheetsBar('err','📴 No network — '+n+' saved on this device.'); });
     }
     processNext();
   }
@@ -871,11 +929,13 @@
 
   // GPS
   function startGPS() {
-    if (!navigator.geolocation){setGPSBar('err','📡 GPS not available');return;}
+    if (!navigator.geolocation){debugLog('GPS unavailable in browser',{},'ERROR');setGPSBar('err','📡 GPS unavailable on this device');return;}
+    debugLog('GPS acquisition started');
     setGPSBar('searching','📡 Acquiring GPS...');
     if (gpsWatcher!==null) navigator.geolocation.clearWatch(gpsWatcher);
     gpsWatcher=navigator.geolocation.watchPosition(
       function(pos){
+        var firstFix=!lastGPS;
         lastGPS={
           lat:pos.coords.latitude.toFixed(6),
           lng:pos.coords.longitude.toFixed(6),
@@ -883,9 +943,10 @@
           alt:pos.coords.altitude ? Math.round(pos.coords.altitude) : null,
           altAcc:pos.coords.altitudeAccuracy ? Math.round(pos.coords.altitudeAccuracy) : null
         };
+        if(firstFix)debugLog('GPS fix acquired',{accuracyMeters:lastGPS.acc});
         setGPSBar('ok','📡 GPS +/-'+lastGPS.acc+'m — '+lastGPS.lat+', '+lastGPS.lng+(lastGPS.alt!==null?' | '+lastGPS.alt+'m elev':''));
       },
-      function(err){ lastGPS=null; setGPSBar('err',err.code===1?'📡 GPS blocked':'📡 GPS unavailable — tap to retry'); },
+      function(err){ lastGPS=null; debugLog('GPS acquisition failed',{code:err.code,message:err.message},'ERROR'); setGPSBar('err',err.code===1?'📡 GPS permission blocked — tap to retry':'📡 GPS unavailable — tap to retry'); },
       {enableHighAccuracy:true,maximumAge:5000,timeout:20000}
     );
   }
@@ -893,10 +954,48 @@
   window.retryGPS=function(){startGPS();};
 
   // AUTH
-  window.signIn=function(){ var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' + '?client_id=' + encodeURIComponent(CLIENT_ID) + '&redirect_uri=' + encodeURIComponent('https://scanner.herdmate.ag') + '&response_type=code' + '&scope=' + encodeURIComponent(SCOPES) + '&access_type=offline' + '&prompt=consent'; window.location.href = authUrl; }; function exchangeCodeForToken(code) { fetch(AUTH_SERVER + '/scout/auth/exchange', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({code: code}) }).then(function(r) { if (!r.ok) return r.json().then(function(e){ throw new Error(e.detail || 'Sign in failed'); }); return r.json(); }).then(function(data) { accessToken = data.access_token; signedInEmail = data.email; localStorage.setItem('hm_google_token', data.access_token); localStorage.setItem('hm_google_token_time', Date.now().toString()); localStorage.setItem('hm_user_email', data.email); var cleanUrl = 'https://scanner.herdmate.ag'; window.history.replaceState({}, document.title, cleanUrl); onSignedIn(); }).catch(function(err) { showToast('Sign in failed: ' + err.message, true); }); } function silentRefresh(email) { return fetch(AUTH_SERVER + '/scout/auth/refresh', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({email: email}) }).then(function(r) { if (!r.ok) throw new Error('refresh failed'); return r.json(); }).then(function(data) { accessToken = data.access_token; signedInEmail = data.email; localStorage.setItem('hm_google_token', data.access_token); localStorage.setItem('hm_google_token_time', Date.now().toString()); onSignedIn(); return true; }).catch(function() { return false; }); } /* Runs immediately when the page loads. */ (function checkAuthOnLoad() {
+  window.signIn=function(){
+    debugLog('Interactive Google sign-in started');
+    var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' + '?client_id=' + encodeURIComponent(CLIENT_ID) + '&redirect_uri=' + encodeURIComponent('https://scanner.herdmate.ag') + '&response_type=code' + '&scope=' + encodeURIComponent(SCOPES) + '&access_type=offline' + '&prompt=consent';
+    window.location.href = authUrl;
+  };
+  function exchangeCodeForToken(code) {
+    debugLog('Authorization code received; exchanging');
+    fetch(AUTH_SERVER + '/scout/auth/exchange', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code})})
+    .then(function(r){if(!r.ok)return r.json().catch(function(){return{};}).then(function(e){throw new Error(e.detail||('Exchange HTTP '+r.status));});return r.json();})
+    .then(function(data){
+      if(!data.access_token)throw new Error('Auth server returned no access token');
+      accessToken=data.access_token;signedInEmail=data.email||'';
+      localStorage.setItem('hm_google_token',data.access_token);
+      localStorage.setItem('hm_google_token_time',Date.now().toString());
+      localStorage.setItem('hm_user_email',signedInEmail);
+      window.history.replaceState({},document.title,'https://scanner.herdmate.ag');
+      debugLog('Google sign-in exchange succeeded',{email:signedInEmail});
+      onSignedIn();
+    }).catch(function(err){debugLog('Google sign-in exchange failed',{message:err.message},'ERROR');showToast('Google sign-in failed — open Log',true);});
+  }
+  function silentRefresh(email) {
+    debugLog('Google token refresh started',{email:email});
+    return fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})})
+    .then(function(r){if(!r.ok)throw new Error('Refresh HTTP '+r.status);return r.json();})
+    .then(function(data){
+      if(!data.access_token)throw new Error('Auth server returned no access token');
+      accessToken=data.access_token;signedInEmail=data.email||email;
+      localStorage.setItem('hm_google_token',data.access_token);
+      localStorage.setItem('hm_google_token_time',Date.now().toString());
+      debugLog('Google token refresh succeeded',{email:signedInEmail});
+      onSignedIn();return true;
+    }).catch(function(err){
+      debugLog('Google token refresh failed',{message:err.message},'ERROR');
+      showScreen('loginScreen');
+      showToast('Google session needs sign-in',true);
+      return false;
+    });
+  }
+  /* Runs immediately when the page loads. */ (function checkAuthOnLoad() {
   var params = new URLSearchParams(window.location.search);
   var code = params.get('code');
-  showToast('DEBUG: checkAuthOnLoad ran, code=' + (code || 'none') + ', url=' + window.location.href);
+  debugLog('Application loaded',{hasAuthorizationCode:!!code,hasSavedEmail:!!localStorage.getItem('hm_user_email')});
   if (code) {
     exchangeCodeForToken(code);
     return;
@@ -912,6 +1011,12 @@
   };
   window.signOut=function(){
     if(accessToken){google.accounts.oauth2.revoke(accessToken,function(){});accessToken=null;}
+    localStorage.removeItem('hm_google_token');
+    localStorage.removeItem('hm_google_token_time');
+    localStorage.removeItem('hm_user_email');
+    signedInEmail='';
+    animalRecordsCache=null;
+    debugLog('Signed out; local scan queue preserved',{queueCount:queueLoad().length});
     if(bleDevice&&bleDevice.gatt.connected) bleDevice.gatt.disconnect();
     uniqueTags={};lastScanTime={};bbScans=[];
     showScreen('loginScreen');
@@ -921,6 +1026,7 @@
     // writes straight into DCC's one real operational sheet — the same
     // sheet the animal lookup already reads from.
     saveLocal(DCC_SHEET_ID, 'DCC');
+    debugLog('Scanner session authenticated',{email:signedInEmail,queueCount:queueLoad().length});
     launchApp();
   }
   function launchApp() {
@@ -993,7 +1099,7 @@
   // SHEETS
   function setSheetsBar(state,msg){var el=document.getElementById('sheetsBar');if(!el)return;el.textContent=msg;el.className='status-bar sheets-'+state;}
   function writeToSheet(record, mode) {
-    if(!accessToken||!sheetId){record.synced=false;queueAdd(record,mode);renderTable();return;}
+    if(!accessToken||!sheetId){record.synced=false;queueAdd(record,mode);debugLog('Record queued; scanner not authenticated',{tag:record.tag,mode:mode},'WARN');renderTable();return;}
     var tab=mode==='Bovine Beacon'?'BovineBeaconLog':'HeadCount';
     var row;
     if(mode==='Bovine Beacon'){
@@ -1006,6 +1112,7 @@
     }).then(function(r){
       if(r.ok){
         if(record.synced!==undefined){record.synced=true;renderTable();}
+        debugLog('Record synced',{tag:record.tag,mode:mode});
         setSheetsBar('ok','✅ Synced — '+operationName);
       } else {
         var status=r.status;
@@ -1015,10 +1122,12 @@
           var reason='HTTP '+status;
           try{ var parsed=JSON.parse(body); if(parsed.error&&parsed.error.message){reason=status+': '+parsed.error.message;} }catch(e){}
           console.error('Sheets append failed', status, body);
-          setSheetsBar('err','❌ Sync failed ('+reason+') — saved offline');
+          debugLog('Record sync rejected',{tag:record.tag,mode:mode,status:status,reason:reason},'ERROR');
+          if(status===401){markAuthExpired('live write');}
+          else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — record saved on device.');}
         });
       }
-    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append network error', err); setSheetsBar('err','❌ Offline (' + (err && err.message ? err.message : 'unknown error') + ') — saved to device'); });
+    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append network error', err); debugLog('Record sync network failure',{tag:record.tag,message:err&&err.message},'ERROR'); setSheetsBar('err','📴 No network — record saved on this device.'); });
   }
 
   // updateSheetWeather removed: the real sheet has no weather columns, and
@@ -1110,7 +1219,7 @@
     return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
     }).then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' reading ' + tabName);
+      if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading '+tabName); err.status=r.status; throw err; }
       return r.json();
     }).then(function(data) {
       var rows = data.values || [];
@@ -1142,7 +1251,7 @@
     return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values:batchGet?' + query, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
     }).then(function(r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' reading Ranch Tracker');
+      if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading Ranch Tracker'); err.status=r.status; throw err; }
       return r.json();
     }).then(function(data) {
       var blocks = (data.valueRanges || []).map(function(block) { return block.values || []; });
@@ -1208,10 +1317,13 @@
       })[0];
       record.animal = match || null;
       record.animalLookupError = null;
+      debugLog(match?'Animal lookup matched':'Animal lookup completed; no linked record',{epc:record.tag,source:match&&match.source,animalTag:match&&match.tag},match?'INFO':'WARN');
       renderTable();
     }).catch(function(err) {
       record.animal = null;
       record.animalLookupError = err.message || 'Could not read animal records from Sheet';
+      debugLog('Animal lookup failed',{epc:record.tag,message:record.animalLookupError,status:err.status},'ERROR');
+      if(err.status===401)markAuthExpired('animal lookup');
       renderTable();
     });
   }
@@ -1221,7 +1333,8 @@
     var r = uniqueTags[key];
     if (!r) return;
     if (r.animal === undefined) { showToast('Still looking up this tag...'); return; }
-    if (r.animal === null) { showToast('No DCC record found for '+r.tag); return; }
+    if (r.animalLookupError) { showToast(r.animalLookupError==='Google session rejected'?'Animal lookup unavailable — Google session rejected':'Animal lookup failed — open Log',true); return; }
+    if (r.animal === null) { showToast('Unlinked UHF tag — no matching animal record for '+r.tag); return; }
     var a = r.animal;
     var overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1433,14 +1546,15 @@
       return;
     }
     fetch('https://weather.herdmate.ag/weather?lat=' + lat + '&lng=' + lng)
-    .then(function(r) { return r.json(); })
+    .then(function(r) { if(!r.ok)throw new Error('Weather HTTP '+r.status); return r.json(); })
     .then(function(data) {
       if (!data.temp) throw new Error('No weather data');
       lastWeather = data;
       lastWeatherFetch = Date.now();
+      debugLog('Weather received',{source:'direct weather service'});
       callback(data);
     })
-    .catch(function() { callback(null); });
+    .catch(function(err) { debugLog('Weather lookup failed',{message:err.message},'ERROR'); callback(null); });
   }
 
   // ── JAWS HAPTICS ──
