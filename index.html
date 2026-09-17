@@ -16,10 +16,10 @@
     --green:#4caf50; --green-dim:#1a3d1a; --blue:#4a9eff; --blue-dim:#0a1a2a;
   }
   .day {
-    --bg:#f5f0e8; --panel:#fff; --panel2:#ede8df; --border:#d0c8b8;
-    --orange:#c85a0a; --orange-bright:#e06a10; --orange-dim:#fde8d0; --orange-muted:#f0c090;
-    --text:#1a1a1a; --muted:#666; --red:#c03030; --red-dim:#fdd;
-    --green:#2e7d32; --green-dim:#d0ead0; --blue:#1a6abf; --blue-dim:#d0e4f8;
+    --bg:#fff; --panel:#fff; --panel2:#f0f0f0; --border:#777;
+    --orange:#9b3f00; --orange-bright:#c55200; --orange-dim:#ffe0bd; --orange-muted:#a94b08;
+    --text:#000; --muted:#333; --red:#a80000; --red-dim:#ffd8d8;
+    --green:#116b16; --green-dim:#d4f2d5; --blue:#0757a6; --blue-dim:#d5e9ff;
   }
   * { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
   body { background:var(--bg); color:var(--text); font-family:'Source Sans 3',sans-serif; min-height:100vh; display:flex; flex-direction:column; }
@@ -89,6 +89,9 @@
   .status-bar.ble-connected { background:#0a1a2a; border-bottom:1px solid var(--blue); color:var(--blue); }
   .status-bar.ble-disconnected { background:var(--panel2); border-bottom:1px solid var(--border); color:var(--muted); cursor:pointer; }
   .status-bar.ble-scanning { background:#0a1a2a; border-bottom:1px solid var(--blue); color:var(--blue); animation:blePulse 1s infinite; }
+  .day .status-bar.gps-ok { background:var(--green-dim); }
+  .day .status-bar.gps-searching { background:#fff3c4; color:#704d00; border-color:#704d00; }
+  .day .status-bar.ble-connected, .day .status-bar.ble-scanning { background:var(--blue-dim); }
   @keyframes blePulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
 
   /* MODE SELECTOR */
@@ -199,6 +202,21 @@
   .read-count { display:inline-block; padding:2px 7px; border-radius:4px; font-size:.68rem; font-weight:600; background:var(--panel2); color:var(--muted); border:1px solid var(--border); font-family:'Oswald',sans-serif; }
   .gps-line { font-size:.65rem; color:var(--muted); display:block; margin-top:2px; }
   .gps-line.ok { color:var(--green); }
+  @media (max-width:520px) {
+    .table-wrap { overflow-x:hidden; padding-left:8px; padding-right:8px; }
+    #hcMode table, #hcMode tbody { display:block; width:100%; }
+    #hcMode thead { display:none; }
+    #hcMode tbody tr { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:7px 10px; margin-bottom:8px; padding:10px; border:1px solid var(--border); border-left:3px solid var(--orange); border-radius:9px; background:var(--panel); }
+    #hcMode tbody td { display:block; padding:0; min-width:0; }
+    #hcMode tbody td:nth-child(1) { display:none; }
+    #hcMode tbody td:nth-child(2) { grid-column:1; overflow-wrap:anywhere; font-size:.92rem; }
+    #hcMode tbody td:nth-child(3) { grid-column:2; text-align:right; }
+    #hcMode tbody td:nth-child(4) { grid-column:1 / 3; border-top:1px solid var(--border); padding-top:7px; }
+    #hcMode tbody td:nth-child(5) { grid-column:1; }
+    #hcMode tbody td:nth-child(5)::before { content:'READS '; color:var(--muted); font-size:.62rem; font-weight:700; letter-spacing:.7px; }
+    #hcMode tbody td:nth-child(6) { grid-column:2; text-align:right; }
+    #hcMode tbody td:nth-child(6)::before { content:'SYNC '; color:var(--muted); font-size:.62rem; font-weight:700; letter-spacing:.7px; }
+  }
 
   /* EXPORT BAR */
   .export-bar { position:fixed; bottom:0; left:0; right:0; background:var(--panel); border-top:2px solid var(--orange); padding:10px 14px; display:flex; gap:8px; z-index:50; }
@@ -407,7 +425,7 @@
     <div class="tabs" id="tabs"></div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>#</th><th>Tag EPC</th><th>Pasture</th><th>First Seen / GPS</th><th>Reads</th><th>☁</th></tr></thead>
+        <thead><tr><th>#</th><th>Tag EPC</th><th>Pasture</th><th>First Seen / GPS</th><th>Reads</th><th>Sync</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
     </div>
@@ -501,7 +519,7 @@
   var uniqueTags = {};
   var currentPasture = '';
   var filterPasture = 'all';
-  var dayMode = false;
+  var dayMode = localStorage.getItem('hm_day_mode') === '1';
   var lastGPS = null;
   var gpsWatcher = null;
   var accessToken = null;
@@ -609,7 +627,7 @@
       } else {
         row=headCountRow(record);
       }
-      fetch(
+      fetchWithAuthRetry(
       'https://sheets.googleapis.com/v4/spreadsheets/' +
         DCC_SHEET_ID +
         '/values/' +
@@ -624,7 +642,7 @@
         body: JSON.stringify({
           values: row
         })
-      }
+      }, 'offline queue append'
     ).then(function(r) {
         if(r.ok){
           queueRemove(0);
@@ -646,7 +664,7 @@
             else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — '+n+' saved. Tap for details.');}
           });
         }
-      }).catch(function(err){ var n=queueLoad().length; console.error('Sheets append network error', err); debugLog('Offline sync network failure',{message:err&&err.message,remaining:n},'ERROR'); setSheetsBar('err','📴 No network — '+n+' saved on this device.'); });
+      }).catch(function(err){ var n=queueLoad().length; console.error('Offline sync failed', err); debugLog(err&&err.authRefreshFailed?'Offline sync authentication refresh failed':'Offline sync network failure',{message:err&&err.message,remaining:n},'ERROR'); if(err&&err.authRefreshFailed)markAuthExpired('offline queue refresh');else setSheetsBar('err','📴 No network — '+n+' saved on this device.'); });
     }
     processNext();
   }
@@ -892,7 +910,10 @@
 
   // ── PROCESS INCOMING TAG (from BLE or keyboard wedge) ──
   function processIncomingTag(raw) {
-    if (!isValidCattleTag(raw)) return;
+    if (!isValidCattleTag(raw)) {
+      if (raw && raw.length >= 8) debugLog('Invalid EPC rejected',{value:raw,rule:'DCC tags must be exactly 15 digits'},'WARN');
+      return;
+    }
     if (isDebounceDuplicate(raw)) return;
     if (currentMode === 'hc') {
       if (!currentPasture) return;
@@ -904,10 +925,7 @@
 
   // EPC VALIDATION
   function isValidCattleTag(epc) {
-    if (!epc||epc.length<8||epc.length>30) return false;
-    if (!/^[A-Z0-9]+$/.test(epc)) return false;
-    if (/0{10,}/.test(epc)) return false;
-    return true;
+    return /^\d{15}$/.test(epc || '');
   }
   function isDebounceDuplicate(epc) {
     var now=Date.now(), last=lastScanTime[epc]||0;
@@ -993,18 +1011,44 @@
       onSignedIn();
     }).catch(function(err){debugLog('Google sign-in exchange failed',{message:err.message},'ERROR');showToast('Google sign-in failed — open Log',true);});
   }
-  function silentRefresh(email) {
+  var tokenRefreshPromise = null;
+  function refreshAccessToken(email) {
+    if(tokenRefreshPromise) return tokenRefreshPromise;
+    email=email||signedInEmail||localStorage.getItem('hm_user_email')||'';
+    if(!email) return Promise.reject(new Error('No saved Google account'));
     debugLog('Google token refresh started',{email:email});
-    return fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})})
+    tokenRefreshPromise=fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})})
     .then(function(r){if(!r.ok)throw new Error('Refresh HTTP '+r.status);return r.json();})
     .then(function(data){
       if(!data.access_token)throw new Error('Auth server returned no access token');
       accessToken=data.access_token;signedInEmail=data.email||email;
       localStorage.setItem('hm_google_token',data.access_token);
       localStorage.setItem('hm_google_token_time',Date.now().toString());
+      localStorage.setItem('hm_user_email',signedInEmail);
       debugLog('Google token refresh succeeded',{email:signedInEmail});
-      onSignedIn();return true;
-    }).catch(function(err){
+      tokenRefreshPromise=null;
+      return accessToken;
+    },function(err){tokenRefreshPromise=null;throw err;});
+    return tokenRefreshPromise;
+  }
+  function fetchWithAuthRetry(url,options,context) {
+    options=options||{};
+    options.headers=Object.assign({},options.headers||{}, {Authorization:'Bearer '+accessToken});
+    return fetch(url,options).then(function(r){
+      if(r.status!==401) return r;
+      debugLog('Google request received 401; refreshing',{context:context},'WARN');
+      return refreshAccessToken().then(function(){
+        options.headers.Authorization='Bearer '+accessToken;
+        return fetch(url,options);
+      }).catch(function(err){
+        err.status=401;
+        err.authRefreshFailed=true;
+        throw err;
+      });
+    });
+  }
+  function silentRefresh(email) {
+    return refreshAccessToken(email).then(function(){onSignedIn();return true;}).catch(function(err){
       debugLog('Google token refresh failed',{message:err.message},'ERROR');
       showScreen('loginScreen');
       showToast('Google session needs sign-in',true);
@@ -1126,9 +1170,9 @@
     } else {
       row=headCountRow(record);
     }
-    fetch('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
-    }).then(function(r){
+    },'live record append').then(function(r){
       if(r.ok){
         if(record.synced!==undefined){record.synced=true;renderTable();}
         debugLog('Record synced',{tag:record.tag,mode:mode});
@@ -1146,14 +1190,21 @@
           else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — record saved on device.');}
         });
       }
-    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append network error', err); debugLog('Record sync network failure',{tag:record.tag,message:err&&err.message},'ERROR'); setSheetsBar('err','📴 No network — record saved on this device.'); });
+    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append failed', err); debugLog(err&&err.authRefreshFailed?'Record sync authentication refresh failed':'Record sync network failure',{tag:record.tag,message:err&&err.message},'ERROR'); if(err&&err.authRefreshFailed)markAuthExpired('live write refresh');else setSheetsBar('err','📴 No network — record saved on this device.'); });
   }
 
   // updateSheetWeather removed: the real sheet has no weather columns, and
   // it was writing a second, mismatched duplicate row per scan anyway.
   function updateSheetWeather(record) { /* no-op — kept as a stub so the one remaining call site doesn't error */ }
 
-  // DAY/NIGHT  window.toggleMode=function(){dayMode=!dayMode;document.getElementById('app').className=dayMode?'day':'';document.getElementById('modeBtn').textContent=dayMode?'🌙':'☀️';};
+  // DAY/NIGHT — remember the field-readable choice between sessions.
+  function applyDisplayMode(){
+    document.getElementById('app').className=dayMode?'day':'';
+    var btn=document.getElementById('modeBtn');
+    if(btn){btn.textContent=dayMode?'🌙':'☀️';btn.title=dayMode?'Switch to night mode':'Switch to outdoor day mode';}
+  }
+  window.toggleMode=function(){dayMode=!dayMode;localStorage.setItem('hm_day_mode',dayMode?'1':'0');applyDisplayMode();};
+  applyDisplayMode();
 
   // HEAD COUNT
   document.getElementById('pastureInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();setPasture();}});
@@ -1235,9 +1286,9 @@
 
   function loadTab(tabName) {
     var range = encodeURIComponent(tabName) + '!A:BZ';
-    return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
+    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
-    }).then(function(r) {
+    },'animal lookup: '+tabName).then(function(r) {
       if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading '+tabName); err.status=r.status; throw err; }
       return r.json();
     }).then(function(data) {
@@ -1267,9 +1318,9 @@
     var query = ranges.map(function(range) {
       return 'ranges=' + encodeURIComponent(range);
     }).join('&');
-    return fetch('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values:batchGet?' + query, {
+    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values:batchGet?' + query, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
-    }).then(function(r) {
+    },'animal lookup: Ranch Tracker').then(function(r) {
       if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading Ranch Tracker'); err.status=r.status; throw err; }
       return r.json();
     }).then(function(data) {
@@ -1556,7 +1607,7 @@
     t.textContent=msg;
     t.className='toast '+(type==='blue'?'blue':type==='good'?'good':type===true||type==='warn'?'warn':'')+' show';
     clearTimeout(t._timer);
-    var duration=(type===true||type==='warn')?3200:1500;
+    var duration=(type===true||type==='warn')?3200:650;
     t._timer=setTimeout(window.hideToast,duration);
   }
   window.hideToast=function(){var t=document.getElementById('toast');if(!t)return;clearTimeout(t._timer);t.className='toast'+(t.classList.contains('blue')?' blue':t.classList.contains('good')?' good':t.classList.contains('warn')?' warn':'');};
