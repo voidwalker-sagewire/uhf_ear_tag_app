@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
-<title>HerdMate Field Scanner</title>
+<title>Reaper Scout — Field Head Count</title>\n<link rel="manifest" href="/manifest.webmanifest">\n<meta name="theme-color" content="#050708">\n<script>if(new URLSearchParams(location.search).get("mode")==="headcount"){document.documentElement.classList.add("headcount-only");}</script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
@@ -249,7 +249,7 @@
   .toast.warn { border-color:var(--red); color:var(--red); }
   .toast.good { border-color:var(--green); color:var(--green); }
   .toast.blue { border-color:var(--blue); color:var(--blue); }
-</style>
+\n  /* Reaper Scout Play shell: preserve proven scanner, suppress deferred modules. */\n  .headcount-only #tabBB, .headcount-only #bbMode { display:none !important; }\n  .headcount-only #tabHC { flex:1 !important; }\n</style>
 </head>
 <body id="app">
 
