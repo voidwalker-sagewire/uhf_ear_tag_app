@@ -479,7 +479,7 @@
   <div class="modal-sheet">
     <div class="modal-title">SCOUT</div>
     <div class="modal-desc">Device and account options</div>
-    <button class="modal-save-btn" onclick="hideHeaderMenu();openMySheet()">📄 Open DCC Sheet</button>
+    <button class="modal-save-btn" onclick="hideHeaderMenu();openMySheet()">📄 Open Operation Sheet</button>
     <button class="modal-add-btn" onclick="hideHeaderMenu();showDebugLog()">🧰 Device Log</button>
     <button class="modal-add-btn" style="color:var(--red);border-color:var(--red);" onclick="hideHeaderMenu();signOut()">Sign Out</button>
     <button class="hdr-menu" style="width:100%;margin-top:10px;" onclick="hideHeaderMenu()">Cancel</button>
@@ -505,6 +505,7 @@
 (function() {
   var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
   var DCC_SHEET_ID = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI'; // DCC Ranch/Calf Tracker — safe to hardcode now the server checks your Google sign-in, not this ID
+  var SCOUT_CONFIG_API = 'https://api.sagewire.dev/scout/api/v1/config';
   var LOOKUP_API = 'https://dave.sagewire.dev/vet/lookup_animal';
   var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
   var AUTH_SERVER = 'https://scout-auth.herdmate.ag';
@@ -523,6 +524,10 @@
   var lastGPS = null;
   var gpsWatcher = null;
   var accessToken = null;
+  var gatewayTenantMode = new URLSearchParams(window.location.search).get('tenant') === 'gateway' || localStorage.getItem('hm_tenant_mode') === 'gateway';
+  if (new URLSearchParams(window.location.search).get('tenant') === 'gateway') localStorage.setItem('hm_tenant_mode','gateway');
+  var operationId = '';
+  var operationFeatures = {};
   var sessionId = null; // one per app launch, shared across every scan that session
   var signedInEmail = localStorage.getItem('hm_user_email') || ''; // for the real sheet's "Logged By" column
   function newHCID(){ return 'H-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7).toUpperCase(); }
@@ -610,14 +615,24 @@
   var QUEUE_KEY = 'hm_offline_queue';
   function queueLoad() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]'); } catch(e) { return []; } }
   function queueSave(q) { try { localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); } catch(e){} }
-  function queueAdd(record,mode) { var q=queueLoad(); q.push({record:record,mode:mode,addedAt:Date.now()}); queueSave(q); }
+  function queueAdd(record,mode) { var q=queueLoad(); q.push({record:record,mode:mode,operationId:operationId||null,addedAt:Date.now()}); queueSave(q); }
   function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
 
   function flushOfflineQueue() {
-    if(!accessToken) return;
+    if(!accessToken || !sheetId || (gatewayTenantMode && !operationId)) return;
     function processNext() {
       var q=queueLoad();
       if(!q.length){setSheetsBar('ok','✅ All data synced — '+operationName);return;}
+      if (q[0].operationId && q[0].operationId !== operationId) {
+        debugLog('Offline queue held for another operation',{queuedOperation:q[0].operationId,currentOperation:operationId},'WARN');
+        setSheetsBar('err','⚠️ Saved scans belong to another operation.');
+        return;
+      }
+      if (!q[0].operationId && gatewayTenantMode) {
+        debugLog('Legacy offline queue held; operation is unverified',{currentOperation:operationId},'WARN');
+        setSheetsBar('err','⚠️ Older saved scans need review before upload.');
+        return;
+      }
       debugLog('Offline queue retry', {remaining:q.length,mode:q[0].mode});
       var item=q[0]; var record=item.record; var mode=item.mode;
       var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
@@ -629,7 +644,7 @@
       }
       fetchWithAuthRetry(
       'https://sheets.googleapis.com/v4/spreadsheets/' +
-        DCC_SHEET_ID +
+        sheetId +
         '/values/' +
         encodeURIComponent(range) +
         ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
@@ -993,6 +1008,7 @@
   // AUTH
   window.signIn=function(){
     debugLog('Interactive Google sign-in started');
+    if (gatewayTenantMode) localStorage.setItem('hm_tenant_mode','gateway');
     var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' + '?client_id=' + encodeURIComponent(CLIENT_ID) + '&redirect_uri=' + encodeURIComponent('https://scanner.herdmate.ag') + '&response_type=code' + '&scope=' + encodeURIComponent(SCOPES) + '&access_type=offline' + '&prompt=consent';
     window.location.href = authUrl;
   };
@@ -1006,7 +1022,7 @@
       localStorage.setItem('hm_google_token',data.access_token);
       localStorage.setItem('hm_google_token_time',Date.now().toString());
       localStorage.setItem('hm_user_email',signedInEmail);
-      window.history.replaceState({},document.title,'https://scanner.herdmate.ag');
+      window.history.replaceState({},document.title,gatewayTenantMode?'https://scanner.herdmate.ag/?mode=headcount&tenant=gateway':'https://scanner.herdmate.ag');
       debugLog('Google sign-in exchange succeeded',{email:signedInEmail});
       onSignedIn();
     }).catch(function(err){debugLog('Google sign-in exchange failed',{message:err.message},'ERROR');showToast('Google sign-in failed — open Log',true);});
@@ -1069,7 +1085,7 @@
   }
 })();
   window.openMySheet=function(){
-    if(!DCC_SHEET_ID){showToast('No sheet connected yet',true);return;}
+    if(!sheetId){showToast('No sheet connected yet',true);return;}
     window.open('https://docs.google.com/spreadsheets/d/'+sheetId+'/edit','_blank');
   };
   window.signOut=function(){
@@ -1077,6 +1093,7 @@
     localStorage.removeItem('hm_google_token');
     localStorage.removeItem('hm_google_token_time');
     localStorage.removeItem('hm_user_email');
+    localStorage.removeItem('hm_tenant_mode');
     signedInEmail='';
     animalRecordsCache=null;
     debugLog('Signed out; local scan queue preserved',{queueCount:queueLoad().length});
@@ -1085,12 +1102,43 @@
     showScreen('loginScreen');
   };
   function onSignedIn() {
+    if (gatewayTenantMode) {
+      resolveGatewayTenant();
+      return;
+    }
     // DCC's custom build: no per-user workspace creation. Every sign-in
     // writes straight into DCC's one real operational sheet — the same
     // sheet the animal lookup already reads from.
     saveLocal(DCC_SHEET_ID, 'DCC');
     debugLog('Scanner session authenticated',{email:signedInEmail,queueCount:queueLoad().length});
     launchApp();
+  }
+  function resolveGatewayTenant() {
+    debugLog('Gateway tenant resolution started',{email:signedInEmail});
+    fetchWithAuthRetry(SCOUT_CONFIG_API,{method:'GET'},'tenant configuration').then(function(r){
+      return r.json().catch(function(){return{};}).then(function(data){return {ok:r.ok,status:r.status,data:data};});
+    }).then(function(result){
+      var data=result.data||{};
+      if(!result.ok || data.status!=='ACTIVE' || !data.operation || !data.operation.id || !data.operation.name || !data.operation.sheet_id) {
+        var state=data.status || (data.error&&data.error.code) || ('HTTP_'+result.status);
+        throw new Error(state);
+      }
+      operationId=String(data.operation.id);
+      operationFeatures=data.features||{};
+      if(operationFeatures.field_head_count!==true) throw new Error('FIELD_HEAD_COUNT_DISABLED');
+      saveLocal(String(data.operation.sheet_id),String(data.operation.name));
+      localStorage.setItem('hm_operation_id',operationId);
+      localStorage.setItem('hm_operation_features',JSON.stringify(operationFeatures));
+      localStorage.setItem('hm_operation_verified_at',Date.now().toString());
+      animalRecordsCache=null;
+      debugLog('Gateway tenant resolved',{operationId:operationId,operationName:operationName,features:operationFeatures});
+      launchApp();
+    }).catch(function(err){
+      operationId=''; sheetId=''; operationName='';
+      debugLog('Gateway tenant resolution blocked',{message:err.message},'ERROR');
+      showScreen('loginScreen');
+      showToast(err.message==='ONBOARDING_REQUIRED'?'This Google account needs Reaper Scout onboarding':'Operation access could not be verified',true);
+    });
   }
   function launchApp() {
     sessionId = 'S-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7).toUpperCase();
@@ -1132,7 +1180,7 @@
       setStep('stepCreate','done','✅ Google Sheet created');
       setStep('stepTab','done','✅ Tabs created');
       setStep('stepHeaders','active','⏳ Writing column headers...');
-      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values:batchUpdate',{
+      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values:batchUpdate',{
         method:'POST',
         headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -1170,7 +1218,7 @@
     } else {
       row=headCountRow(record);
     }
-    fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+DCC_SHEET_ID+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     },'live record append').then(function(r){
       if(r.ok){
@@ -1286,7 +1334,7 @@
 
   function loadTab(tabName) {
     var range = encodeURIComponent(tabName) + '!A:BZ';
-    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values/' + range, {
+    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + range, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
     },'animal lookup: '+tabName).then(function(r) {
       if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading '+tabName); err.status=r.status; throw err; }
@@ -1318,7 +1366,7 @@
     var query = ranges.map(function(range) {
       return 'ranges=' + encodeURIComponent(range);
     }).join('&');
-    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + DCC_SHEET_ID + '/values:batchGet?' + query, {
+    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values:batchGet?' + query, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
     },'animal lookup: Ranch Tracker').then(function(r) {
       if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading Ranch Tracker'); err.status=r.status; throw err; }
@@ -1380,7 +1428,7 @@
   }
 
   function lookupAnimal(key, record) {
-    if (!DCC_SHEET_ID || !accessToken) { record.animal = null; return; }
+    if (!sheetId || !accessToken || operationFeatures.animal_lookup === false) { record.animal = null; return; }
     loadAnimalRecords().then(function(records) {
       var match = records.filter(function(r) {
         return r.tag === record.tag || (r.uhf && r.uhf === record.tag);
