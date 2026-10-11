@@ -524,8 +524,8 @@
   var lastGPS = null;
   var gpsWatcher = null;
   var accessToken = null;
-  var gatewayTenantMode = new URLSearchParams(window.location.search).get('tenant') === 'gateway' || localStorage.getItem('hm_tenant_mode') === 'gateway';
-  if (new URLSearchParams(window.location.search).get('tenant') === 'gateway') localStorage.setItem('hm_tenant_mode','gateway');
+  var gatewayTenantMode = window.location.pathname === '/gateway.html' || new URLSearchParams(window.location.search).get('tenant') === 'gateway' || localStorage.getItem('hm_tenant_mode') === 'gateway';
+  if (gatewayTenantMode) localStorage.setItem('hm_tenant_mode','gateway');
   var operationId = '';
   var operationFeatures = {};
   var sessionId = null; // one per app launch, shared across every scan that session
@@ -1022,7 +1022,7 @@
       localStorage.setItem('hm_google_token',data.access_token);
       localStorage.setItem('hm_google_token_time',Date.now().toString());
       localStorage.setItem('hm_user_email',signedInEmail);
-      window.history.replaceState({},document.title,gatewayTenantMode?'https://scanner.herdmate.ag/?mode=headcount&tenant=gateway':'https://scanner.herdmate.ag');
+      window.history.replaceState({},document.title,gatewayTenantMode?'https://scanner.herdmate.ag/gateway.html?mode=headcount':'https://scanner.herdmate.ag');
       debugLog('Google sign-in exchange succeeded',{email:signedInEmail});
       onSignedIn();
     }).catch(function(err){debugLog('Google sign-in exchange failed',{message:err.message},'ERROR');showToast('Google sign-in failed — open Log',true);});
@@ -1093,7 +1093,11 @@
     localStorage.removeItem('hm_google_token');
     localStorage.removeItem('hm_google_token_time');
     localStorage.removeItem('hm_user_email');
-    localStorage.removeItem('hm_tenant_mode');
+    // Keep the route through sign-out and the root Google OAuth callback.
+    // Only the legacy entry point may use the legacy DCC configuration.
+    if (gatewayTenantMode) localStorage.setItem('hm_tenant_mode','gateway');
+    else localStorage.removeItem('hm_tenant_mode');
+    operationId=''; sheetId=''; operationName=''; operationFeatures={};
     signedInEmail='';
     animalRecordsCache=null;
     debugLog('Signed out; local scan queue preserved',{queueCount:queueLoad().length});
@@ -1114,6 +1118,7 @@
     launchApp();
   }
   function resolveGatewayTenant() {
+    operationId=''; sheetId=''; operationName=''; operationFeatures={};
     debugLog('Gateway tenant resolution started',{email:signedInEmail});
     fetchWithAuthRetry(SCOUT_CONFIG_API,{method:'GET'},'tenant configuration').then(function(r){
       return r.json().catch(function(){return{};}).then(function(data){return {ok:r.ok,status:r.status,data:data};});
