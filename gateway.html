@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
 <meta name="reaper-scout-route" content="gateway-rs-tx-007">
+<script>
+// HerdMate's public front door is separate from the scanner/OAuth entry.
+if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URLSearchParams(location.search).has('code')) location.replace('/welcome.html');
+</script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
@@ -303,7 +307,8 @@
     <svg viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
     Sign in with Google
   </button>
-  <div class="login-note">Your data goes to your own Google Drive. HerdMate never stores your animal records.</div>
+  <div class="login-note">Records sync to your connected operation’s Google Sheet. Check the operation name after signing in.</div>
+  <a href="/help.html" target="_blank" rel="noopener" style="color:var(--orange);margin-top:16px;">C72 and account setup guide</a>
 </div>
 
 <!-- ONBOARDING -->
@@ -311,8 +316,8 @@
   <div class="onboard-card">
     <div class="onboard-icon">🐄</div>
     <div class="onboard-title">Welcome to HerdMate</div>
-    <div class="onboard-desc">What's the name of your operation? We'll set up your HerdMate workspace in Google Drive automatically.</div>
-    <input class="onboard-input" id="operationInput" placeholder="e.g. Dutton Cattle Company" autocomplete="off" spellcheck="false" maxlength="50" />
+    <div class="onboard-desc">Name your operation. New workspaces use one Animals table for every species, plus a HeadCounter scan log.</div>
+    <input class="onboard-input" id="operationInput" placeholder="Your operation name" autocomplete="off" spellcheck="false" maxlength="50" />
     <button class="onboard-btn" id="onboardBtn" onclick="createWorkspace()">Set Up My HerdMate →</button>
     <div class="onboard-progress" id="onboardProgress" style="display:none">
       <div class="step" id="stepCreate">⏳ Creating your Google Sheet...</div>
@@ -482,6 +487,7 @@
     <div class="modal-desc">Device and account options</div>
     <button class="modal-save-btn" onclick="hideHeaderMenu();openMySheet()">📄 Open Operation Sheet</button>
     <button class="modal-add-btn" onclick="hideHeaderMenu();showDebugLog()">🧰 Device Log</button>
+    <a href="/help.html" target="_blank" rel="noopener" style="display:block;padding:14px;color:var(--orange);">C72 and account setup guide</a>
     <button class="modal-add-btn" style="color:var(--red);border-color:var(--red);" onclick="hideHeaderMenu();signOut()">Sign Out</button>
     <button class="hdr-menu" style="width:100%;margin-top:10px;" onclick="hideHeaderMenu()">Cancel</button>
   </div>
@@ -1101,6 +1107,7 @@
     operationId=''; sheetId=''; operationName=''; operationFeatures={};
     signedInEmail='';
     animalRecordsCache=null;
+    animalRecordsPromise=null;
     debugLog('Signed out; local scan queue preserved',{queueCount:queueLoad().length});
     if(bleDevice&&bleDevice.gatt.connected) bleDevice.gatt.disconnect();
     uniqueTags={};lastScanTime={};bbScans=[];
@@ -1137,6 +1144,7 @@
       localStorage.setItem('hm_operation_features',JSON.stringify(operationFeatures));
       localStorage.setItem('hm_operation_verified_at',Date.now().toString());
       animalRecordsCache=null;
+      animalRecordsPromise=null;
       debugLog('Gateway tenant resolved',{operationId:operationId,operationName:operationName,features:operationFeatures});
       launchApp();
     }).catch(function(err){
@@ -1158,7 +1166,24 @@
   }
 
   // CREATE WORKSPACE
+  var ANIMALS_HEADERS = ['Tag EPC','Animal ID','Printed Tag','Name','Species','Sex','Breed','DOB','Color','Description','Dam ID','Sire ID','Location','Status','Weight','Notes'];
+  var HEADCOUNTER_HEADERS = ['HCID','Session','Date','Tag EPC','Pasture','First Seen','Latitude','Longitude','GPS Accuracy (m)','Read Count','Mode','Operation','Logged By'];
+  function workspaceDefinition(title) {
+    return {properties:{title:title},sheets:[
+      {properties:{title:'Animals',index:0}},
+      {properties:{title:'HeadCounter',index:1}}
+    ]};
+  }
+  function workspaceHeaders() {
+    return {valueInputOption:'RAW',data:[
+      {range:'Animals!A1:P1',values:[ANIMALS_HEADERS]},
+      {range:'HeadCounter!A1:M1',values:[HEADCOUNTER_HEADERS]}
+    ]};
+  }
   window.createWorkspace = function() {
+    // Creating a Sheet alone does not register a Gateway tenant. Never
+    // bypass verified operation access with a locally created workspace.
+    if(gatewayTenantMode){showToast('Account setup needs Gateway registration — see the setup guide',true);return;}
     var opName=document.getElementById('operationInput').value.trim();
     if(!opName){showToast('Enter your operation name',true);return;}
     operationName=opName;
@@ -1170,14 +1195,7 @@
     fetch('https://sheets.googleapis.com/v4/spreadsheets',{
       method:'POST',
       headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
-      body:JSON.stringify({
-        properties:{title:sheetTitle},
-        sheets:[
-          {properties:{title:'Head Count',index:0}},
-          {properties:{title:'Bovine Beacon Log',index:1}},
-          {properties:{title:'Animals',index:2}}
-        ]
-      })
+      body:JSON.stringify(workspaceDefinition(sheetTitle))
     })
     .then(function(r){return r.json();})
     .then(function(data){
@@ -1189,14 +1207,7 @@
       return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values:batchUpdate',{
         method:'POST',
         headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
-        body:JSON.stringify({
-          valueInputOption:'RAW',
-          data:[
-            {range:'Head Count!A1:P1',values:[['Session','Date','Tag EPC','Pasture','First Seen','Latitude','Longitude','GPS Accuracy (m)','Elevation (m)','Read Count','Mode','Operation','Temperature','Conditions','Wind','Humidity']]},
-            {range:'Bovine Beacon Log!A1:I1',values:[['Date','Time','Tag EPC','Target Tag','Pasture','Found','Latitude','Longitude','Operation']]},
-            {range:'Animals!A1:H1',values:[['Tag EPC','Animal ID','Sex','Breed','DOB','Dam Tag','Sire Tag','Notes']]}
-          ]
-        })
+        body:JSON.stringify(workspaceHeaders())
       });
     })
     .then(function(r){
@@ -1330,13 +1341,32 @@
     }
   }
 
-  // ── DCC ANIMAL LOOKUP — INDEPENDENT, reads the Sheet directly ──
-  // No call to Dave's API. Uses Scout's own OAuth accessToken (already
-  // granted spreadsheets scope at sign-in) to read the SAME sheet Scout
-  // writes to. Checks Calf Tracker first, then Ranch Tracker — matching
-  // either the printed tag number OR the UHF EPC column, same as Dave's
-  // original working lookup logic.
+  // Animals is the new-account schema. Existing DCC/HerdMate tracker
+  // workbooks retain their legacy lookup; records are never migrated here.
   var animalRecordsCache = null; // fetched once per session, not per-scan
+  var animalRecordsPromise = null;
+
+  function animalSchema(titles, id) {
+    if(id===DCC_SHEET_ID) return 'legacy';
+    if(titles.indexOf('Animals')!==-1) return 'animals';
+    if(titles.indexOf('Calf Tracker')!==-1 && titles.indexOf('Ranch Tracker')!==-1) return 'legacy';
+    throw new Error('This workspace needs an Animals table. Open the setup guide.');
+  }
+  function animalsFromRows(rows) {
+    function value(r, keys) {
+      for(var i=0;i<keys.length;i++) if(r[keys[i]]!==undefined && r[keys[i]]!=='') return String(r[keys[i]]).trim();
+      return '';
+    }
+    return rows.map(function(r){return {
+      source:'Animals',uhf:value(r,['Tag EPC','UHF#']),
+      tag:value(r,['Printed Tag','Animal ID']),display_id:value(r,['Animal ID']),
+      name:value(r,['Name']),species:value(r,['Species']),
+      sex:value(r,['Sex']),breed:value(r,['Breed']),birth_date:value(r,['DOB']),
+      color:value(r,['Color']),description:value(r,['Description']),
+      dam:value(r,['Dam ID','Dam Tag']),sire:value(r,['Sire ID','Sire Tag']),
+      pasture:value(r,['Location']),status:value(r,['Status']),weight:value(r,['Weight']),notes:value(r,['Notes'])
+    };}).filter(function(r){return r.tag || r.uhf;});
+  }
 
   function loadTab(tabName) {
     var range = encodeURIComponent(tabName) + '!A:BZ';
@@ -1415,7 +1445,15 @@
 
   function loadAnimalRecords() {
     if (animalRecordsCache) return Promise.resolve(animalRecordsCache);
-    return Promise.all([
+    if (animalRecordsPromise) return animalRecordsPromise;
+    var requestedSheet=sheetId;
+    var pending=fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'?fields=sheets.properties.title',{},'animal schema').then(function(r){
+      if(!r.ok){var err=new Error('HTTP '+r.status+' reading workspace schema');err.status=r.status;throw err;}
+      return r.json();
+    }).then(function(data){
+      var titles=(data.sheets||[]).map(function(s){return s.properties.title;});
+      if(animalSchema(titles,requestedSheet)==='animals') return loadTab('Animals').then(animalsFromRows);
+      return Promise.all([
       loadTab('Calf Tracker').then(function(rows) {
         return rows.map(function(r) {
           return {
@@ -1427,10 +1465,17 @@
         });
       }),
       loadRanchTracker()
-    ]).then(function(results) {
-      animalRecordsCache = results[0].concat(results[1]);
-      return animalRecordsCache;
-    });
+      ]).then(function(results){return results[0].concat(results[1]);});
+    }).then(function(records){
+      if(sheetId!==requestedSheet) throw new Error('Operation changed during animal lookup');
+      animalRecordsCache=records;
+      return records;
+    }).then(function(records){
+      if(animalRecordsPromise===pending) animalRecordsPromise=null;
+      return records;
+    },function(err){if(animalRecordsPromise===pending) animalRecordsPromise=null;throw err;});
+    animalRecordsPromise=pending;
+    return pending;
   }
 
   function lookupAnimal(key, record) {
@@ -1463,7 +1508,7 @@
       missingOverlay.className='modal-overlay';
       missingOverlay.id='animalModalOverlay';
       missingOverlay.onclick=function(e){if(e.target===missingOverlay)closeAnimalModal();};
-      missingOverlay.innerHTML='<div class="modal-sheet"><button class="modal-close" onclick="closeAnimalModal()">✕</button><div class="modal-title">Unlinked UHF</div><div class="modal-desc">No Calf Tracker or Ranch Tracker record is linked to this EPC.</div><div style="font-family:monospace;font-size:.9rem;overflow-wrap:anywhere;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">'+esc(r.tag)+'</div><button class="hdr-menu" style="width:100%;margin-top:12px;" onclick="closeAnimalModal()">Close</button></div>';
+      missingOverlay.innerHTML='<div class="modal-sheet"><button class="modal-close" onclick="closeAnimalModal()">✕</button><div class="modal-title">Unlinked UHF</div><div class="modal-desc">No animal record is linked to this EPC in your connected operation. Add its full EPC to Animals in a new workspace, then reload Scout. Existing DCC records stay in their tracker tables.</div><div style="font-family:monospace;font-size:.9rem;overflow-wrap:anywhere;padding:12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">'+esc(r.tag)+'</div><button class="hdr-menu" style="width:100%;margin-top:12px;" onclick="openMySheet()">Open my sheet</button><button class="hdr-menu" style="width:100%;margin-top:12px;" onclick="closeAnimalModal()">Close</button></div>';
       document.body.appendChild(missingOverlay);
       return;
     }
@@ -1474,11 +1519,11 @@
     sheet.className = 'modal-sheet';
     var rows = [
       ['Tag #', a.tag], ['UHF#', a.uhf], ['Source', a.source],
-      ['Display ID', a.display_id], ['Sex', a.sex], ['Breed', a.breed],
+      ['Animal ID', a.display_id], ['Name', a.name], ['Species', a.species], ['Description', a.description], ['Sex', a.sex], ['Breed', a.breed],
       ['Type', a.type], ['Color', a.color],
       ['Birth date', a.birth_date || a.date], ['Age', a.age],
       ['Dam', a.dam || a.dam_tag], ['Sire', a.sire],
-      ['Pasture', a.pasture], ['Status', a.status],
+      ['Location', a.pasture], ['Status', a.status],
       ['Weight', a.weight || a.birth_weight], ['BCS', a.bcs || a.dam_bcs],
       ['Due date', a.due_date], ['Palp. result', a.palp_result], ['Months preg.', a.months_preg],
       ['Disposition', a.disposition],
@@ -1615,7 +1660,7 @@
         ?'<span class="gps-line ok">🌤 '+r.weather.temp+' · '+r.weather.condition+'</span>'
         :(r.firstGPS?'<span class="gps-line" style="color:#555">⏳ fetching weather...</span>':'');
       var syncHtml=r.synced===null?'<span style="color:var(--orange);font-size:.8rem">⏳</span>':r.synced?'<span style="color:var(--green);font-size:.8rem">✅</span>':'<span style="color:var(--red);font-size:.75rem">⚠️</span>';
-      var animalHtml=r.animal===undefined?'<span style="color:var(--muted);font-size:.75rem">⏳ checking DCC...</span>'
+      var animalHtml=r.animal===undefined?'<span style="color:var(--muted);font-size:.75rem">⏳ checking animal records...</span>'
         :r.animal===null?(r.animalLookupError?'<span style="color:var(--red);font-size:.72rem">⚠️ Lookup failed — tap for log</span>':'<span style="color:var(--orange);font-size:.75rem">⚠ Unlinked UHF</span>')
         :'<span style="color:var(--green);font-size:.78rem;text-decoration:underline">🐄 '+esc(r.animal.tag||'')+' — tap for record</span>';
       rows+='<tr class="'+(i===0?'flash':'')+'" onclick="showAnimalModal(\''+esc(k).replace(/'/g,"\\'").replace(/"/g,'&quot;')+'\')" style="cursor:pointer"><td style="color:var(--muted);font-size:.75rem">'+(filtered.length-i)+'</td><td class="tag-id">'+esc(r.tag)+'</td><td><span class="chip">'+esc(r.pasture)+'</span></td><td><span style="font-size:.82rem">'+r.firstTime+'</span>'+gpsHtml+'<br>'+animalHtml+'</td><td><span class="read-count">'+r.readCount+'x</span></td><td>'+syncHtml+'</td></tr>';
