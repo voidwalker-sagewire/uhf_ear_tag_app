@@ -7,7 +7,7 @@ INDEX = (Path(__file__).parents[1] / "index.html").read_text(encoding="utf-8")
 
 class GatewayTenantContractTest(unittest.TestCase):
     def test_gateway_route_is_explicit_and_fail_closed(self):
-        self.assertIn("tenant') === 'gateway'", INDEX)
+        self.assertIn("var gatewayTenantMode = true", INDEX)
         self.assertIn("SCOUT_CONFIG_API", INDEX)
         self.assertIn("data.status!=='ACTIVE'", INDEX)
         self.assertIn("ONBOARDING_REQUIRED", INDEX)
@@ -27,8 +27,8 @@ class GatewayTenantContractTest(unittest.TestCase):
         self.assertIn("q[0].operationId !== operationId", INDEX)
         self.assertIn("Legacy offline queue held", INDEX)
 
-    def test_legacy_route_remains_available_for_code12(self):
-        self.assertIn("saveLocal(DCC_SHEET_ID, 'DCC')", INDEX)
+    def test_no_authentication_bypass_to_dcc(self):
+        self.assertNotIn("saveLocal(DCC_SHEET_ID, 'DCC')", INDEX)
 
 
 if __name__ == "__main__":
