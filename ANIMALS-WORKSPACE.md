@@ -32,10 +32,11 @@ the edit. Confirm the actual Coolify resource serving herdmate.ag before
 deploying; a source match alone does not prove its deployment wiring.
 
 The generic sagewire-onboarding service does not provision these Sheets.
-Gateway ONBOARDING_REQUIRED still needs tenant registration; createWorkspace
-must not bypass Gateway verification. Automatic customer provisioning and an
-in-app animal-creation form remain pending. This change supplies the schema
-contract and loader; it does not claim those flows are deployed or accepted.
+The shared Reaper Gateway onboarding candidate now handles automatic customer
+provisioning and verified registration. Scout enters setup on ONBOARDING_REQUIRED
+and re-resolves Gateway access before scanning. Publication and a fresh-customer
+Google/C72 integration test remain pending. An in-app animal-creation form is
+still a separate unfinished workflow. See REAPER-ONBOARDING.md.
 
 Publish the repository changes, merge, redeploy the appropriate Coolify
 resources, then verify the root welcome page, the guide, DCC lookup and a

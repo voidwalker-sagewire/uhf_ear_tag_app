@@ -10,7 +10,6 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Reaper Scout — Field Head Count</title>\n<link rel="manifest" href="/manifest.webmanifest">\n<meta name="theme-color" content="#050708">\n<script>if(new URLSearchParams(location.search).get("mode")==="headcount"){document.documentElement.classList.add("headcount-only");}</script>
-<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Sans+3:wght@400;600&display=swap');
 
@@ -317,7 +316,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     <div class="onboard-icon">🐄</div>
     <div class="onboard-title">Welcome to HerdMate</div>
     <div class="onboard-desc">Name your operation. New workspaces use one Animals table for every species, plus a HeadCounter scan log.</div>
-    <input class="onboard-input" id="operationInput" placeholder="Your operation name" autocomplete="off" spellcheck="false" maxlength="50" />
+    <input class="onboard-input" id="operationInput" placeholder="Your operation name" autocomplete="off" spellcheck="false" maxlength="80" />
     <button class="onboard-btn" id="onboardBtn" onclick="createWorkspace()">Set Up My HerdMate →</button>
     <div class="onboard-progress" id="onboardProgress" style="display:none">
       <div class="step" id="stepCreate">⏳ Creating your Google Sheet...</div>
@@ -325,6 +324,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       <div class="step" id="stepHeaders">⏳ Writing column headers...</div>
       <div class="step" id="stepDone">⏳ Almost ready...</div>
     </div>
+    <button class="onboard-btn" onclick="signOut()" style="margin-top:12px">Use a different Google account</button>
     <div class="onboard-note">A Google Sheet named "HerdMate — [Your Operation]" will appear in your Google Drive.</div>
   </div>
 </div>
@@ -512,9 +512,12 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 (function() {
   var CLIENT_ID = '284699934813-85gcnvo9l19qki5ul9ckepgpfg067c7e.apps.googleusercontent.com';
   var DCC_SHEET_ID = '1ziqvEJRYmqf4IvYLa4Ij3z4I-swln4nAMJI6gLlzlGI'; // DCC Ranch/Calf Tracker — safe to hardcode now the server checks your Google sign-in, not this ID
-  var SCOUT_CONFIG_API = 'https://api.sagewire.dev/scout/api/v1/config';
+  var REAPER_ONBOARDING_API = 'https://api.sagewire.dev/reaper/api/v1/onboarding';
+  var onboardingBusy = false;
+  var onboardingAccountEpoch = 0;
+  var SCOUT_CONFIG_API = 'https://api.sagewire.dev/reaper/api/v1/config';
   var LOOKUP_API = 'https://dave.sagewire.dev/vet/lookup_animal';
-  var SCOPES = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
+  var SCOPES = 'openid https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
   var AUTH_SERVER = 'https://scout-auth.herdmate.ag';
   var YEAR = new Date().getFullYear();
 
@@ -531,7 +534,9 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   var lastGPS = null;
   var gpsWatcher = null;
   var accessToken = null;
-  var gatewayTenantMode = window.location.pathname === '/gateway.html' || new URLSearchParams(window.location.search).get('tenant') === 'gateway' || localStorage.getItem('hm_tenant_mode') === 'gateway';
+  // All scanner entry points use verified operation routing, including a fresh
+  // root launch from an existing Android wrapper. DCC retains its legacy loader.
+  var gatewayTenantMode = true;
   if (gatewayTenantMode) localStorage.setItem('hm_tenant_mode','gateway');
   var operationId = '';
   var operationFeatures = {};
@@ -563,7 +568,6 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       operationName
     ]];
   }
-  var tokenClient = null;
   var sheetId = '';
   var operationName = '';
   var currentMode = 'hc';
@@ -622,7 +626,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   var QUEUE_KEY = 'hm_offline_queue';
   function queueLoad() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]'); } catch(e) { return []; } }
   function queueSave(q) { try { localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); } catch(e){} }
-  function queueAdd(record,mode) { var q=queueLoad(); q.push({record:record,mode:mode,operationId:operationId||null,addedAt:Date.now()}); queueSave(q); }
+  function queueAdd(record,mode,owner) { var q=queueLoad(); q.push({record:record,mode:mode,operationId:arguments.length>2?owner:(operationId||null),addedAt:Date.now()}); queueSave(q); }
   function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
 
   function flushOfflineQueue() {
@@ -932,6 +936,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   // ── PROCESS INCOMING TAG (from BLE or keyboard wedge) ──
   function processIncomingTag(raw) {
+    if(!accessToken||!operationId||!sheetId)return;
     if (!isValidCattleTag(raw)) {
       if (raw && raw.length >= 8) debugLog('Invalid EPC rejected',{value:raw,rule:'DCC tags must be exactly 15 digits'},'WARN');
       return;
@@ -1013,17 +1018,41 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   window.retryGPS=function(){startGPS();};
 
   // AUTH
+  function randomAuthValue() {
+    var bytes=new Uint8Array(32);window.crypto.getRandomValues(bytes);
+    return Array.from(bytes,function(b){return b.toString(16).padStart(2,'0');}).join('');
+  }
   window.signIn=function(){
-    debugLog('Interactive Google sign-in started');
     if (gatewayTenantMode) localStorage.setItem('hm_tenant_mode','gateway');
-    var authUrl = 'https://accounts.google.com/o/oauth2/v2/auth' + '?client_id=' + encodeURIComponent(CLIENT_ID) + '&redirect_uri=' + encodeURIComponent('https://scanner.herdmate.ag') + '&response_type=code' + '&scope=' + encodeURIComponent(SCOPES) + '&access_type=offline' + '&prompt=consent';
-    window.location.href = authUrl;
+    var verifier=randomAuthValue(),state=randomAuthValue();
+    sessionStorage.setItem('hm_oauth_verifier',verifier);
+    sessionStorage.setItem('hm_oauth_state',state);
+    return window.crypto.subtle.digest('SHA-256',new TextEncoder().encode(verifier)).then(function(digest){
+      var challenge=btoa(String.fromCharCode.apply(null,new Uint8Array(digest))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+      var params=new URLSearchParams({client_id:CLIENT_ID,redirect_uri:'https://scanner.herdmate.ag',
+        response_type:'code',scope:SCOPES,access_type:'offline',prompt:'consent select_account',
+        state:state,code_challenge:challenge,code_challenge_method:'S256'});
+      debugLog('Interactive Google sign-in started');
+      window.location.href='https://accounts.google.com/o/oauth2/v2/auth?'+params.toString();
+    }).catch(function(){showToast('Secure Google sign-in could not start. Reopen the scanner over HTTPS.',true);});
   };
   function exchangeCodeForToken(code) {
+    var params=new URLSearchParams(window.location.search);
+    var expectedState=sessionStorage.getItem('hm_oauth_state');
+    var verifier=sessionStorage.getItem('hm_oauth_verifier');
+    sessionStorage.removeItem('hm_oauth_state');sessionStorage.removeItem('hm_oauth_verifier');
+    window.history.replaceState({},document.title,gatewayTenantMode?'/gateway.html':'/');
+    if(!expectedState || params.get('state')!==expectedState || !verifier){
+      showToast('Sign-in session could not be verified. Please sign in again.',true);return;
+    }
+    var epoch=onboardingAccountEpoch;
     debugLog('Authorization code received; exchanging');
-    fetch(AUTH_SERVER + '/scout/auth/exchange', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code})})
+    fetch(AUTH_SERVER + '/scout/auth/exchange', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code,code_verifier:verifier})})
     .then(function(r){if(!r.ok)return r.json().catch(function(){return{};}).then(function(e){throw new Error(e.detail||('Exchange HTTP '+r.status));});return r.json();})
     .then(function(data){
+      if(epoch!==onboardingAccountEpoch) throw new Error('Sign-in cancelled');
+      if(!data.session_token)throw new Error('Sign-in server update is required');
+      localStorage.setItem('hm_auth_session',data.session_token);
       if(!data.access_token)throw new Error('Auth server returned no access token');
       accessToken=data.access_token;signedInEmail=data.email||'';
       localStorage.setItem('hm_google_token',data.access_token);
@@ -1039,28 +1068,35 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if(tokenRefreshPromise) return tokenRefreshPromise;
     email=email||signedInEmail||localStorage.getItem('hm_user_email')||'';
     if(!email) return Promise.reject(new Error('No saved Google account'));
+    var deviceSession=localStorage.getItem('hm_auth_session');
+    if(!deviceSession) return Promise.reject(new Error('Fresh Google sign-in required'));
+    var epoch=onboardingAccountEpoch;
     debugLog('Google token refresh started',{email:email});
-    tokenRefreshPromise=fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:email})})
+    var pending=fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+deviceSession},body:JSON.stringify({email:email})})
     .then(function(r){if(!r.ok)throw new Error('Refresh HTTP '+r.status);return r.json();})
     .then(function(data){
       if(!data.access_token)throw new Error('Auth server returned no access token');
+      if(epoch!==onboardingAccountEpoch) throw new Error('Sign-in cancelled');
       accessToken=data.access_token;signedInEmail=data.email||email;
       localStorage.setItem('hm_google_token',data.access_token);
       localStorage.setItem('hm_google_token_time',Date.now().toString());
       localStorage.setItem('hm_user_email',signedInEmail);
       debugLog('Google token refresh succeeded',{email:signedInEmail});
-      tokenRefreshPromise=null;
       return accessToken;
-    },function(err){tokenRefreshPromise=null;throw err;});
-    return tokenRefreshPromise;
+    });
+    tokenRefreshPromise=pending;
+    return pending.finally(function(){if(tokenRefreshPromise===pending)tokenRefreshPromise=null;});
   }
   function fetchWithAuthRetry(url,options,context) {
+    var epoch=onboardingAccountEpoch;
     options=options||{};
     options.headers=Object.assign({},options.headers||{}, {Authorization:'Bearer '+accessToken});
     return fetch(url,options).then(function(r){
+      if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
       if(r.status!==401) return r;
       debugLog('Google request received 401; refreshing',{context:context},'WARN');
       return refreshAccessToken().then(function(){
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
         options.headers.Authorization='Bearer '+accessToken;
         return fetch(url,options);
       }).catch(function(err){
@@ -1071,13 +1107,16 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     });
   }
   function silentRefresh(email) {
-    return refreshAccessToken(email).then(function(){onSignedIn();return true;}).catch(function(err){
+    var epoch=onboardingAccountEpoch;
+    return refreshAccessToken(email).then(function(){if(epoch!==onboardingAccountEpoch)return false;onSignedIn();return true;}).catch(function(err){
+      if(epoch!==onboardingAccountEpoch)return false;
       debugLog('Google token refresh failed',{message:err.message},'ERROR');
       showScreen('loginScreen');
       showToast('Google session needs sign-in',true);
       return false;
     });
   }
+  showScreen('loginScreen');
   /* Runs immediately when the page loads. */ (function checkAuthOnLoad() {
   var params = new URLSearchParams(window.location.search);
   var code = params.get('code');
@@ -1096,7 +1135,13 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     window.open('https://docs.google.com/spreadsheets/d/'+sheetId+'/edit','_blank');
   };
   window.signOut=function(){
-    if(accessToken){google.accounts.oauth2.revoke(accessToken,function(){});accessToken=null;}
+    onboardingAccountEpoch++;
+    onboardingBusy=false;
+    tokenRefreshPromise=null;
+    var deviceSession=localStorage.getItem('hm_auth_session');
+    if(deviceSession) fetch(AUTH_SERVER+'/scout/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+deviceSession}}).catch(function(){});
+    localStorage.removeItem('hm_auth_session');
+    accessToken=null;
     localStorage.removeItem('hm_google_token');
     localStorage.removeItem('hm_google_token_time');
     localStorage.removeItem('hm_user_email');
@@ -1111,27 +1156,26 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     debugLog('Signed out; local scan queue preserved',{queueCount:queueLoad().length});
     if(bleDevice&&bleDevice.gatt.connected) bleDevice.gatt.disconnect();
     uniqueTags={};lastScanTime={};bbScans=[];
+    var operationInput=document.getElementById('operationInput');
+    if(operationInput){operationInput.value='';operationInput.disabled=false;}
     showScreen('loginScreen');
   };
   function onSignedIn() {
-    if (gatewayTenantMode) {
-      resolveGatewayTenant();
-      return;
-    }
-    // DCC's custom build: no per-user workspace creation. Every sign-in
-    // writes straight into DCC's one real operational sheet — the same
-    // sheet the animal lookup already reads from.
-    saveLocal(DCC_SHEET_ID, 'DCC');
-    debugLog('Scanner session authenticated',{email:signedInEmail,queueCount:queueLoad().length});
-    launchApp();
+    return resolveGatewayTenant();
   }
   function resolveGatewayTenant() {
     operationId=''; sheetId=''; operationName=''; operationFeatures={};
     debugLog('Gateway tenant resolution started',{email:signedInEmail});
-    fetchWithAuthRetry(SCOUT_CONFIG_API,{method:'GET'},'tenant configuration').then(function(r){
+    var accountEpoch=onboardingAccountEpoch;
+    return fetchWithAuthRetry(SCOUT_CONFIG_API,{method:'GET'},'tenant configuration').then(function(r){
       return r.json().catch(function(){return{};}).then(function(data){return {ok:r.ok,status:r.status,data:data};});
     }).then(function(result){
+      if(accountEpoch!==onboardingAccountEpoch) return;
       var data=result.data||{};
+      if(result.ok && data.status==='ONBOARDING_REQUIRED') {
+        showGatewayOnboarding(data.onboarding);
+        return;
+      }
       if(!result.ok || data.status!=='ACTIVE' || !data.operation || !data.operation.id || !data.operation.name || !data.operation.sheet_id) {
         var state=data.status || (data.error&&data.error.code) || ('HTTP_'+result.status);
         throw new Error(state);
@@ -1148,6 +1192,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       debugLog('Gateway tenant resolved',{operationId:operationId,operationName:operationName,features:operationFeatures});
       launchApp();
     }).catch(function(err){
+      if(accountEpoch!==onboardingAccountEpoch) return;
       operationId=''; sheetId=''; operationName='';
       debugLog('Gateway tenant resolution blocked',{message:err.message},'ERROR');
       showScreen('loginScreen');
@@ -1180,82 +1225,82 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       {range:'HeadCounter!A1:M1',values:[HEADCOUNTER_HEADERS]}
     ]};
   }
-  window.createWorkspace = function() {
-    // Creating a Sheet alone does not register a Gateway tenant. Never
-    // bypass verified operation access with a locally created workspace.
-    if(gatewayTenantMode){showToast('Account setup needs Gateway registration — see the setup guide',true);return;}
-    var opName=document.getElementById('operationInput').value.trim();
-    if(!opName){showToast('Enter your operation name',true);return;}
-    operationName=opName;
+  function showGatewayOnboarding(pending) {
+    operationId=''; sheetId=''; operationName=''; operationFeatures={};
+    var input=document.getElementById('operationInput');
+    input.value=pending&&pending.name||'';
+    input.disabled=!!(pending&&pending.name);
     var btn=document.getElementById('onboardBtn');
-    btn.disabled=true; btn.textContent='Setting up...';
+    btn.disabled=false;
+    btn.textContent=pending?'Resume setup →':'Set Up My HerdMate →';
+    document.getElementById('onboardProgress').style.display='none';
+    showScreen('onboardScreen');
+  }
+  function createGatewayWorkspace() {
+    if(onboardingBusy) return Promise.resolve();
+    var name=document.getElementById('operationInput').value.trim();
+    if(!name || name.length>80){showToast('Enter an operation name of 1–80 characters',true);return Promise.resolve();}
+    onboardingBusy=true;
+    var epoch=onboardingAccountEpoch;
+    var btn=document.getElementById('onboardBtn');
+    btn.disabled=true;btn.textContent='Setting up...';
     document.getElementById('onboardProgress').style.display='block';
-    var sheetTitle='HerdMate — '+opName+' '+YEAR;
-    setStep('stepCreate','active','⏳ Creating your Google Sheet...');
-    fetch('https://sheets.googleapis.com/v4/spreadsheets',{
-      method:'POST',
-      headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
-      body:JSON.stringify(workspaceDefinition(sheetTitle))
-    })
-    .then(function(r){return r.json();})
-    .then(function(data){
-      if(!data.spreadsheetId) throw new Error('Sheet creation failed');
-      sheetId=data.spreadsheetId;
-      setStep('stepCreate','done','✅ Google Sheet created');
-      setStep('stepTab','done','✅ Tabs created');
-      setStep('stepHeaders','active','⏳ Writing column headers...');
-      return fetch('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values:batchUpdate',{
-        method:'POST',
-        headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
-        body:JSON.stringify(workspaceHeaders())
+    setStep('stepCreate','active','⏳ Creating or resuming your Google Sheet...');
+    return fetchWithAuthRetry(REAPER_ONBOARDING_API,{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})
+    },'Reaper operation setup').then(function(r){
+      return r.json().catch(function(){return{};}).then(function(data){
+        if(!r.ok || data.status!=='ACTIVE') throw new Error(data.error&&data.error.message||'Setup is incomplete. Retry to resume.');
+        return data;
       });
-    })
-    .then(function(r){
-      if(!r.ok) throw new Error('Header write failed');
-      setStep('stepHeaders','done','✅ Headers written');
-      setStep('stepDone','active','⏳ Finalizing...');
-      saveLocal(sheetId,operationName);
-      setTimeout(function(){setStep('stepDone','done','✅ HerdMate workspace ready!');setTimeout(function(){launchApp();},800);},500);
-    })
-    .catch(function(err){
-      btn.disabled=false; btn.textContent='Set Up My HerdMate →';
-      showToast('Setup failed — check connection',true);
+    }).then(function(){
+      if(epoch!==onboardingAccountEpoch) return;
+      setStep('stepCreate','done','✅ Customer-owned Google Sheet verified');
+      setStep('stepTab','done','✅ Animals and scan log ready');
+      setStep('stepHeaders','done','✅ Column headers verified');
+      setStep('stepDone','active','⏳ Verifying operation access...');
+      // Resolve again through the shared registry; never trust a local Sheet ID.
+      return resolveGatewayTenant();
+    }).catch(function(err){
+      if(epoch!==onboardingAccountEpoch) return;
+      setStep('stepDone','error',err.message);
+      showToast(err.message,true);
+    }).finally(function(){
+      if(epoch!==onboardingAccountEpoch) return;
+      onboardingBusy=false;btn.disabled=false;btn.textContent='Resume setup →';
     });
+  }
+  window.createWorkspace = function() {
+    return createGatewayWorkspace();
   };
   function setStep(id,state,text){var el=document.getElementById(id);if(!el)return;el.textContent=text;el.className='step '+state;}
 
   // SHEETS
   function setSheetsBar(state,msg){var el=document.getElementById('sheetsBar');if(!el)return;el.textContent=msg;el.className='status-bar sheets-'+state;}
   function writeToSheet(record, mode) {
-    if(!accessToken||!sheetId){record.synced=false;queueAdd(record,mode);debugLog('Record queued; scanner not authenticated',{tag:record.tag,mode:mode},'WARN');renderTable();return;}
-    var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
-    var row;
-    if(mode==='Bovine Beacon'){
-      row=beaconRow(record, bbTarget);
-    } else {
-      row=headCountRow(record);
+    var owner=operationId||null,epoch=onboardingAccountEpoch;
+    function holdRecord(err) {
+      record.synced=false;
+      queueAdd(record,mode,owner);
+      debugLog('Record held for original operation',{tag:record.tag,operationId:owner,message:err&&err.message},'WARN');
+      if(epoch!==onboardingAccountEpoch) return;
+      renderTable();
+      if(err&&err.authRefreshFailed)markAuthExpired('live write refresh');
+      else setSheetsBar('err','📴 Sync incomplete — record saved on this device.');
     }
-    fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    if(!accessToken||!sheetId||!operationId){holdRecord();return Promise.resolve();}
+    var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
+    var row=mode==='Bovine Beacon'?beaconRow(record,bbTarget):headCountRow(record);
+    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     },'live record append').then(function(r){
-      if(r.ok){
-        if(record.synced!==undefined){record.synced=true;renderTable();}
-        debugLog('Record synced',{tag:record.tag,mode:mode});
-        setSheetsBar('ok','✅ Synced — '+operationName);
-      } else {
-        var status=r.status;
-        r.text().then(function(body){
-          if(record.synced!==undefined){record.synced=false;renderTable();}
-          queueAdd(record,mode);
-          var reason='HTTP '+status;
-          try{ var parsed=JSON.parse(body); if(parsed.error&&parsed.error.message){reason=status+': '+parsed.error.message;} }catch(e){}
-          console.error('Sheets append failed', status, body);
-          debugLog('Record sync rejected',{tag:record.tag,mode:mode,status:status,reason:reason},'ERROR');
-          if(status===401){markAuthExpired('live write');}
-          else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — record saved on device.');}
-        });
-      }
-    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append failed', err); debugLog(err&&err.authRefreshFailed?'Record sync authentication refresh failed':'Record sync network failure',{tag:record.tag,message:err&&err.message},'ERROR'); if(err&&err.authRefreshFailed)markAuthExpired('live write refresh');else setSheetsBar('err','📴 No network — record saved on this device.'); });
+      if(!r.ok){var error=new Error('Sheets append HTTP '+r.status);error.authRefreshFailed=r.status===401;throw error;}
+      record.synced=true;
+      if(epoch!==onboardingAccountEpoch) return;
+      renderTable();
+      debugLog('Record synced',{tag:record.tag,mode:mode});
+      setSheetsBar('ok','✅ Synced — '+operationName);
+    }).catch(holdRecord);
   }
 
   // updateSheetWeather removed: the real sheet has no weather columns, and
@@ -1934,32 +1979,6 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     var oi=document.getElementById('operationInput');
     if(oi) oi.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();createWorkspace();}});
 
-    var check=setInterval(function(){
-      if(window.google&&window.google.accounts){
-        clearInterval(check);
-        tokenClient=google.accounts.oauth2.initTokenClient({
-          client_id:CLIENT_ID,
-          scope:SCOPES,
-          callback:function(response){
-            if(response.error){showToast('Sign in failed',true);return;}
-            accessToken=response.access_token;
-            localStorage.setItem('hm_google_token', response.access_token);
-            fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-              headers:{Authorization:'Bearer '+response.access_token}
-            }).then(function(r){return r.json();}).then(function(info){
-              if(info.email){ localStorage.setItem('hm_user_email', info.email); signedInEmail = info.email; }
-            });
-            onSignedIn();
-          }
-        });
-        // Show login — but only if we're not already signed in. Our new
-        // silent sign-in logic runs first; without this check, this old
-        // code was overriding a successful sign-in every time.
-        if (!accessToken) {
-          showScreen('loginScreen');
-        }
-      }
-    },200);
   });
 
   renderTable();

@@ -11,7 +11,7 @@ function context(overrides = {}) {
   return vm.createContext({URLSearchParams, window:{location:{pathname:'/gateway.html',search:''}},
     localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
     operationId:'stale',sheetId:'stale-sheet',operationName:'Stale',operationFeatures:{},
-    gatewayTenantMode:true,accessToken:'fake-token',signedInEmail:'test@example.com',
+    onboardingAccountEpoch:0,showGatewayOnboarding(){},gatewayTenantMode:true,accessToken:'fake-token',signedInEmail:'test@example.com',
     SCOUT_CONFIG_API:'https://example.invalid/config',
     debugLog(){}, showScreen(){}, showToast(){}, animalRecordsCache:null,
     saveLocal(id,name){this.sheetId=id;this.operationName=name;}, launchApp(){},
@@ -26,10 +26,10 @@ test('cleared-state dedicated page always selects Gateway',()=>{
   vm.runInContext(between('  var gatewayTenantMode =','  var operationId ='),c);
   assert.equal(c.gatewayTenantMode,true);
 });
-test('legacy root with no route marker retains the working DCC entry',()=>{
+test('fresh scanner root also resolves through Gateway',()=>{
   const c=context({window:{location:{pathname:'/',search:''}}});
   vm.runInContext(between('  var gatewayTenantMode =','  var operationId ='),c);
-  assert.equal(c.gatewayTenantMode,false);
+  assert.equal(c.gatewayTenantMode,true);
 });
 for (const operation of [{id:'a',name:'Ranch A',sheet_id:'sheet-a'},{id:'b',name:'Ranch B',sheet_id:'sheet-b'}]) {
   test(`Gateway resolves only returned operation ${operation.id}`,async()=>{
