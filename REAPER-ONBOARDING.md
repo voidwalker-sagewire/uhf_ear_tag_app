@@ -12,6 +12,8 @@ verifies its schema/ownership and persists membership. Scout then calls shared
 operation restores its original name. Duplicate taps are suppressed, failures
 remain retryable, and responses arriving after sign-out/account change are held.
 Existing operation-scoped offline queues remain held across account changes.
+A late failed write retains its original operation in the queue; a stale 401
+cannot retry a former operation’s request using the next account’s credentials.
 
 Authentication now uses OAuth state and S256 PKCE. A private device-session
 credential from the auth service is required for silent refresh; email alone is

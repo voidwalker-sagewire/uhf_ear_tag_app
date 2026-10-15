@@ -23,7 +23,7 @@ class GatewayTenantContractTest(unittest.TestCase):
         self.assertFalse(any("DCC_SHEET_ID" in line for line in request_lines))
 
     def test_offline_queue_is_operation_scoped(self):
-        self.assertIn("operationId:operationId||null", INDEX)
+        self.assertIn("function queueAdd(record,mode,owner)", INDEX)
         self.assertIn("q[0].operationId !== operationId", INDEX)
         self.assertIn("Legacy offline queue held", INDEX)
 

@@ -626,7 +626,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   var QUEUE_KEY = 'hm_offline_queue';
   function queueLoad() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]'); } catch(e) { return []; } }
   function queueSave(q) { try { localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); } catch(e){} }
-  function queueAdd(record,mode) { var q=queueLoad(); q.push({record:record,mode:mode,operationId:operationId||null,addedAt:Date.now()}); queueSave(q); }
+  function queueAdd(record,mode,owner) { var q=queueLoad(); q.push({record:record,mode:mode,operationId:arguments.length>2?owner:(operationId||null),addedAt:Date.now()}); queueSave(q); }
   function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
 
   function flushOfflineQueue() {
@@ -936,6 +936,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   // ── PROCESS INCOMING TAG (from BLE or keyboard wedge) ──
   function processIncomingTag(raw) {
+    if(!accessToken||!operationId||!sheetId)return;
     if (!isValidCattleTag(raw)) {
       if (raw && raw.length >= 8) debugLog('Invalid EPC rejected',{value:raw,rule:'DCC tags must be exactly 15 digits'},'WARN');
       return;
@@ -1071,7 +1072,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if(!deviceSession) return Promise.reject(new Error('Fresh Google sign-in required'));
     var epoch=onboardingAccountEpoch;
     debugLog('Google token refresh started',{email:email});
-    tokenRefreshPromise=fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+deviceSession},body:JSON.stringify({email:email})})
+    var pending=fetch(AUTH_SERVER + '/scout/auth/refresh',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+deviceSession},body:JSON.stringify({email:email})})
     .then(function(r){if(!r.ok)throw new Error('Refresh HTTP '+r.status);return r.json();})
     .then(function(data){
       if(!data.access_token)throw new Error('Auth server returned no access token');
@@ -1081,18 +1082,21 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       localStorage.setItem('hm_google_token_time',Date.now().toString());
       localStorage.setItem('hm_user_email',signedInEmail);
       debugLog('Google token refresh succeeded',{email:signedInEmail});
-      tokenRefreshPromise=null;
       return accessToken;
-    },function(err){tokenRefreshPromise=null;throw err;});
-    return tokenRefreshPromise;
+    });
+    tokenRefreshPromise=pending;
+    return pending.finally(function(){if(tokenRefreshPromise===pending)tokenRefreshPromise=null;});
   }
   function fetchWithAuthRetry(url,options,context) {
+    var epoch=onboardingAccountEpoch;
     options=options||{};
     options.headers=Object.assign({},options.headers||{}, {Authorization:'Bearer '+accessToken});
     return fetch(url,options).then(function(r){
+      if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
       if(r.status!==401) return r;
       debugLog('Google request received 401; refreshing',{context:context},'WARN');
       return refreshAccessToken().then(function(){
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
         options.headers.Authorization='Bearer '+accessToken;
         return fetch(url,options);
       }).catch(function(err){
@@ -1103,7 +1107,9 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     });
   }
   function silentRefresh(email) {
-    return refreshAccessToken(email).then(function(){onSignedIn();return true;}).catch(function(err){
+    var epoch=onboardingAccountEpoch;
+    return refreshAccessToken(email).then(function(){if(epoch!==onboardingAccountEpoch)return false;onSignedIn();return true;}).catch(function(err){
+      if(epoch!==onboardingAccountEpoch)return false;
       debugLog('Google token refresh failed',{message:err.message},'ERROR');
       showScreen('loginScreen');
       showToast('Google session needs sign-in',true);
@@ -1131,6 +1137,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   window.signOut=function(){
     onboardingAccountEpoch++;
     onboardingBusy=false;
+    tokenRefreshPromise=null;
     var deviceSession=localStorage.getItem('hm_auth_session');
     if(deviceSession) fetch(AUTH_SERVER+'/scout/auth/logout',{method:'POST',headers:{Authorization:'Bearer '+deviceSession}}).catch(function(){});
     localStorage.removeItem('hm_auth_session');
@@ -1271,35 +1278,29 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // SHEETS
   function setSheetsBar(state,msg){var el=document.getElementById('sheetsBar');if(!el)return;el.textContent=msg;el.className='status-bar sheets-'+state;}
   function writeToSheet(record, mode) {
-    if(!accessToken||!sheetId){record.synced=false;queueAdd(record,mode);debugLog('Record queued; scanner not authenticated',{tag:record.tag,mode:mode},'WARN');renderTable();return;}
-    var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
-    var row;
-    if(mode==='Bovine Beacon'){
-      row=beaconRow(record, bbTarget);
-    } else {
-      row=headCountRow(record);
+    var owner=operationId||null,epoch=onboardingAccountEpoch;
+    function holdRecord(err) {
+      record.synced=false;
+      queueAdd(record,mode,owner);
+      debugLog('Record held for original operation',{tag:record.tag,operationId:owner,message:err&&err.message},'WARN');
+      if(epoch!==onboardingAccountEpoch) return;
+      renderTable();
+      if(err&&err.authRefreshFailed)markAuthExpired('live write refresh');
+      else setSheetsBar('err','📴 Sync incomplete — record saved on this device.');
     }
-    fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+    if(!accessToken||!sheetId||!operationId){holdRecord();return Promise.resolve();}
+    var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
+    var row=mode==='Bovine Beacon'?beaconRow(record,bbTarget):headCountRow(record);
+    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
       method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
     },'live record append').then(function(r){
-      if(r.ok){
-        if(record.synced!==undefined){record.synced=true;renderTable();}
-        debugLog('Record synced',{tag:record.tag,mode:mode});
-        setSheetsBar('ok','✅ Synced — '+operationName);
-      } else {
-        var status=r.status;
-        r.text().then(function(body){
-          if(record.synced!==undefined){record.synced=false;renderTable();}
-          queueAdd(record,mode);
-          var reason='HTTP '+status;
-          try{ var parsed=JSON.parse(body); if(parsed.error&&parsed.error.message){reason=status+': '+parsed.error.message;} }catch(e){}
-          console.error('Sheets append failed', status, body);
-          debugLog('Record sync rejected',{tag:record.tag,mode:mode,status:status,reason:reason},'ERROR');
-          if(status===401){markAuthExpired('live write');}
-          else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — record saved on device.');}
-        });
-      }
-    }).catch(function(err){ if(record.synced!==undefined){record.synced=false;renderTable();} queueAdd(record,mode); console.error('Sheets append failed', err); debugLog(err&&err.authRefreshFailed?'Record sync authentication refresh failed':'Record sync network failure',{tag:record.tag,message:err&&err.message},'ERROR'); if(err&&err.authRefreshFailed)markAuthExpired('live write refresh');else setSheetsBar('err','📴 No network — record saved on this device.'); });
+      if(!r.ok){var error=new Error('Sheets append HTTP '+r.status);error.authRefreshFailed=r.status===401;throw error;}
+      record.synced=true;
+      if(epoch!==onboardingAccountEpoch) return;
+      renderTable();
+      debugLog('Record synced',{tag:record.tag,mode:mode});
+      setSheetsBar('ok','✅ Synced — '+operationName);
+    }).catch(holdRecord);
   }
 
   // updateSheetWeather removed: the real sheet has no weather columns, and

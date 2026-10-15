@@ -88,3 +88,40 @@ test('saved email without a private device credential cannot silently refresh',a
   await assert.rejects(c.refreshAccessToken('owner@example.com'),/Fresh Google sign-in/);
   assert.equal(calls,0);
 });
+test('401 arriving after sign-out cannot refresh or retry with another account',async()=>{
+  let release,calls=0,refreshes=0;
+  const c=context({fetch:()=>{calls++;return new Promise(r=>release=r);},refreshAccessToken:async()=>refreshes++});
+  vm.runInContext(section('  function fetchWithAuthRetry(', '  function silentRefresh('),c);
+  const pending=c.fetchWithAuthRetry('https://example.invalid/sheet-a',{},'test');
+  c.onboardingAccountEpoch++;c.accessToken='account-b';release({status:401});
+  await assert.rejects(pending,/Operation changed/);assert.equal(calls,1);assert.equal(refreshes,0);
+});
+test('cancelled refresh clears its promise and cannot replace the new account token',async()=>{
+  let release;
+  const c=context({fetch:()=>new Promise(r=>release=r)});
+  c.localStorage.setItem('hm_auth_session','private-test-session');
+  vm.runInContext(section('  var tokenRefreshPromise =', '  function fetchWithAuthRetry('),c);
+  const pending=c.refreshAccessToken('owner@example.com');
+  c.onboardingAccountEpoch++;c.accessToken='new-account-token';
+  release({ok:true,json:async()=>({access_token:'old-account-token',email:'owner@example.com'})});
+  await assert.rejects(pending,/Sign-in cancelled/);
+  assert.equal(c.tokenRefreshPromise,null);assert.equal(c.accessToken,'new-account-token');
+});
+test('late failed scan write keeps its original operation in the offline queue',async()=>{
+  let release;const queued=[];
+  const c=context({operationId:'a',sheetId:'sheet-a',fetchWithAuthRetry:()=>new Promise(r=>release=r),
+    queueAdd:(record,mode,owner)=>queued.push({record,mode,owner}),renderTable(){},setSheetsBar(){},
+    headCountRow:()=>[['test']],markAuthExpired(){throw Error('must not expire new account');}});
+  vm.runInContext(section('  function writeToSheet(', '  // updateSheetWeather removed:'),c);
+  const pending=c.writeToSheet({tag:'0001'},'Head Count');
+  c.onboardingAccountEpoch++;c.operationId='b';c.sheetId='sheet-b';
+  release({ok:false,status:401});await pending;
+  assert.equal(queued.length,1);assert.equal(queued[0].owner,'a');
+});
+test('queue storage preserves an explicit original owner rather than current account',()=>{
+  let items=[];
+  const c=context({operationId:'b',queueLoad:()=>items,queueSave:q=>items=q});
+  vm.runInContext(section('  function queueAdd(', '  function queueRemove('),c);
+  c.queueAdd({tag:'a-tag'},'Head Count','a');c.queueAdd({tag:'b-tag'},'Head Count');
+  assert.equal(items[0].operationId,'a');assert.equal(items[1].operationId,'b');
+});
