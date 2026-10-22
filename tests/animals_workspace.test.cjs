@@ -5,7 +5,7 @@ const vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,'..','index.html'),'utf8');
 function section(start,end){return source.slice(source.indexOf(start),source.indexOf(end,source.indexOf(start)));}
 function context(extra={}){
-  const c=vm.createContext({Promise,String,encodeURIComponent,DCC_SHEET_ID:'dcc-sheet',sheetId:'new-sheet',accessToken:'test',...extra});
+  const c=vm.createContext({Promise,String,encodeURIComponent,setTimeout,debugLog(){},onboardingAccountEpoch:0,DCC_SHEET_ID:'dcc-sheet',sheetId:'new-sheet',accessToken:'test',...extra});
   vm.runInContext(section('  var ANIMALS_HEADERS =','  window.createWorkspace ='),c);
   vm.runInContext(section('  var animalRecordsCache =','  function loadTab('),c);
   vm.runInContext(section('  function loadAnimalRecords()','  function lookupAnimal('),c);

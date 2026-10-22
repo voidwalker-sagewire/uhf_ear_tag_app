@@ -11,7 +11,7 @@ function context(overrides = {}) {
   return vm.createContext({URLSearchParams, window:{location:{pathname:'/gateway.html',search:''}},
     localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
     operationId:'stale',sheetId:'stale-sheet',operationName:'Stale',operationFeatures:{},
-    onboardingAccountEpoch:0,showGatewayOnboarding(){},gatewayTenantMode:true,accessToken:'fake-token',signedInEmail:'test@example.com',
+    onboardingAccountEpoch:0,queueFlushPromise:null,showGatewayOnboarding(){},gatewayTenantMode:true,accessToken:'fake-token',signedInEmail:'test@example.com',
     SCOUT_CONFIG_API:'https://example.invalid/config',
     debugLog(){}, showScreen(){}, showToast(){}, animalRecordsCache:null,
     saveLocal(id,name){this.sheetId=id;this.operationName=name;}, launchApp(){},
@@ -65,13 +65,13 @@ test('dedicated page matches the scanner source with a deployment marker',()=>{
   assert.equal(fs.readFileSync(path.join(root,'gateway.html'),'utf8'),source.replace('<head>','<head>\n<meta name="reaper-scout-route" content="gateway-rs-tx-007">'));
 });
 for (const owner of ['a', null]) {
-  test(`operation b cannot upload queued ${owner || 'legacy'} scans`,()=>{
+  test(`operation b cannot upload queued ${owner || 'legacy'} scans`,async()=>{
     let requests=0;
     const queue=[{operationId:owner,record:{tag:'fake'},mode:'Head Count'}];
     const c=context({operationId:'b',sheetId:'sheet-b',queueLoad:()=>queue,
       setSheetsBar(){},fetchWithAuthRetry(){requests++;throw Error('cross-tenant write');}});
     vm.runInContext(between('  function flushOfflineQueue()', '  // ── CHROME CHECK'),c);
-    vm.runInContext('flushOfflineQueue()',c);
+    await vm.runInContext('flushOfflineQueue()',c);
     assert.equal(requests,0);assert.equal(queue.length,1);
   });
 }

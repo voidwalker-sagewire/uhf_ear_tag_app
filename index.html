@@ -549,22 +549,22 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // real sheet doesn't have any, so none are sent.
   function headCountRow(record){
     return [[
-      newHCID(), sessionId, record.firstDate, record.tag, record.pasture,
+      record.syncId, record.sessionId, record.firstDate, record.tag, record.pasture,
       record.firstTime,
       record.firstGPS?record.firstGPS.lat:'',
       record.firstGPS?record.firstGPS.lng:'',
       record.firstGPS?record.firstGPS.acc:'',
-      record.readCount, 'Head Count', operationName, signedInEmail
+      record.readCount, 'Head Count', record.operationName, record.loggedBy
     ]];
   }
   // Matches the REAL Bovine Beacon Log tab exactly: BEACONID, Date, Time,
   // Tag EPC, Target Tag, Pasture, Found, Latitude, Longitude, Operation.
   function beaconRow(record, targetTag){
     return [[
-      newBeaconID(), record.date, record.time, record.tag, targetTag||'',
+      record.syncId, record.date, record.time, record.tag, targetTag||'',
       record.pasture, record.isTarget?'YES':'NO',
       record.gps?record.gps.lat:'', record.gps?record.gps.lng:'',
-      operationName
+      record.operationName
     ]];
   }
   var sheetId = '';
@@ -611,7 +611,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     else{showToast('Copy is not available on this device',true);}
   };
   function markAuthExpired(context) {
-    debugLog('Google authentication rejected', {context:context,queueCount:queueLoad().length}, 'ERROR');
+    debugLog('Google authentication rejected', {context:context,queueCount:queueCountForStatus()}, 'ERROR');
     setSheetsBar('err','🔐 Google session rejected — scans saved here. Tap for details.');
   }
 
@@ -623,75 +623,194 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   // ── OFFLINE QUEUE ──
   var QUEUE_KEY = 'hm_offline_queue';
-  function queueLoad() { try { return JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]'); } catch(e) { return []; } }
-  function queueSave(q) { try { localStorage.setItem(QUEUE_KEY,JSON.stringify(q)); } catch(e){} }
-  function queueAdd(record,mode,owner) { var q=queueLoad(); q.push({record:record,mode:mode,operationId:arguments.length>2?owner:(operationId||null),addedAt:Date.now()}); queueSave(q); }
-  function queueRemove(idx) { var q=queueLoad(); q.splice(idx,1); queueSave(q); }
-
-  function flushOfflineQueue() {
-    if(!accessToken || !sheetId || (gatewayTenantMode && !operationId)) return;
-    function processNext() {
-      var q=queueLoad();
-      if(!q.length){setSheetsBar('ok','✅ All data synced — '+operationName);return;}
-      if (q[0].operationId && q[0].operationId !== operationId) {
-        debugLog('Offline queue held for another operation',{queuedOperation:q[0].operationId,currentOperation:operationId},'WARN');
-        setSheetsBar('err','⚠️ Saved scans belong to another operation.');
-        return;
-      }
-      if (!q[0].operationId && gatewayTenantMode) {
-        debugLog('Legacy offline queue held; operation is unverified',{currentOperation:operationId},'WARN');
-        setSheetsBar('err','⚠️ Older saved scans need review before upload.');
-        return;
-      }
-      debugLog('Offline queue retry', {remaining:q.length,mode:q[0].mode});
-      var item=q[0]; var record=item.record; var mode=item.mode;
-      var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
-      var row;
-      if(mode==='Bovine Beacon'){
-        row=beaconRow(record, record.targetTag);
-      } else {
-        row=headCountRow(record);
-      }
-      fetchWithAuthRetry(
-      'https://sheets.googleapis.com/v4/spreadsheets/' +
-        sheetId +
-        '/values/' +
-        encodeURIComponent(range) +
-        ':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',
-        {
-        method: 'POST',
-        headers: {
-          Authorization: 'Bearer ' + accessToken,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          values: row
-        })
-      }, 'offline queue append'
-    ).then(function(r) {
-        if(r.ok){
-          queueRemove(0);
-          debugLog('Offline record synced', {tag:record.tag,mode:mode,remaining:queueLoad().length});
-          var key=record.tag+'__'+record.pasture;
-          if(uniqueTags[key]){uniqueTags[key].synced=true;renderTable();}
-          var remaining=queueLoad().length;
-          setSheetsBar('ok',remaining>0?'✅ Syncing offline — '+remaining+' left':'✅ All data synced — '+operationName);
-          if(remaining>0) setTimeout(processNext,200);
-        } else {
-          var status=r.status;
-          r.text().then(function(body){
-            var n=queueLoad().length;
-            var reason='HTTP '+status;
-            try{ var parsed=JSON.parse(body); if(parsed.error&&parsed.error.message){reason=status+': '+parsed.error.message;} }catch(e){}
-            console.error('Sheets append failed', status, body);
-            debugLog('Offline sync rejected', {status:status,reason:reason,remaining:n}, 'ERROR');
-            if(status===401){markAuthExpired('offline queue');}
-            else{setSheetsBar('err','❌ Sync rejected (HTTP '+status+') — '+n+' saved. Tap for details.');}
-          });
-        }
-      }).catch(function(err){ var n=queueLoad().length; console.error('Offline sync failed', err); debugLog(err&&err.authRefreshFailed?'Offline sync authentication refresh failed':'Offline sync network failure',{message:err&&err.message,remaining:n},'ERROR'); if(err&&err.authRefreshFailed)markAuthExpired('offline queue refresh');else setSheetsBar('err','📴 No network — '+n+' saved on this device.'); });
+  var queueFlushPromise = null;
+  var queueRetryTimer = null;
+  var queueFlushInterval = null;
+  var observationRefs = {};
+  function queueLoad() {
+    var q=JSON.parse(localStorage.getItem(QUEUE_KEY)||'[]');
+    if(!Array.isArray(q)) throw new Error('Saved scan queue needs review');
+    return q;
+  }
+  function queueSave(q) {
+    localStorage.setItem(QUEUE_KEY,JSON.stringify(q));
+  }
+  function queueCountForStatus() {
+    try {return queueLoad().length;} catch(e) {return 'unreadable';}
+  }
+  function prepareObservation(record,mode,owner) {
+    if(record.syncId) return;
+    record.syncId=mode==='Bovine Beacon'?newBeaconID():newHCID();
+    record.sessionId=sessionId||'';
+    record.operationId=owner;
+    record.sheetId=sheetId||'';
+    record.operationName=operationName||'';
+    record.loggedBy=signedInEmail||'';
+    if(mode==='Bovine Beacon') record.targetTag=record.targetTag||bbTarget||'';
+  }
+  function queueAdd(record,mode,owner) {
+    owner=arguments.length>2?owner:(operationId||null);
+    prepareObservation(record,mode,owner);
+    observationRefs[owner+'|'+record.syncId]=record;
+    var q=queueLoad(),now=Date.now();
+    var item=q.filter(function(x){return x.id===record.syncId && x.operationId===owner;})[0];
+    if(!item) {
+      item={id:record.syncId,mode:mode,operationId:owner,sheetId:record.sheetId,
+        addedAt:now,needsReconcile:!!record.sheetRow || record.synced===true};
+      q.push(item);
+    } else {
+      item.notBefore=Math.min(now+1000,(item.dirtySince||now)+5000);
     }
-    processNext();
+    if(!item.dirtySince) item.dirtySince=now;
+    item.record={
+      syncId:record.syncId,sessionId:record.sessionId,operationId:owner,
+      sheetId:record.sheetId,operationName:record.operationName,loggedBy:record.loggedBy,
+      tag:record.tag,pasture:record.pasture,firstDate:record.firstDate,
+      firstTime:record.firstTime,firstGPS:record.firstGPS,readCount:record.readCount,
+      date:record.date,time:record.time,gps:record.gps,isTarget:record.isTarget,
+      targetTag:record.targetTag
+    };
+    if(record.sheetRow) item.sheetRow=record.sheetRow;
+    queueSave(q);
+  }
+  function queueRemove(id,owner,sentCount) {
+    var q=queueLoad();
+    var i=q.findIndex(function(x){return x.id===id && x.operationId===owner;});
+    if(i<0) return;
+    if(Number(q[i].record.readCount||0)>sentCount) {
+      q[i].needsReconcile=true;
+      q[i].dirtySince=Date.now();
+      q[i].notBefore=Math.max(q[i].notBefore||0,Date.now()+1000);
+    }
+    else q.splice(i,1);
+    queueSave(q);
+  }
+  function scheduleQueueFlush(delay) {
+    if(queueRetryTimer) return;
+    queueRetryTimer=setTimeout(function(){queueRetryTimer=null;flushOfflineQueue();},delay||1000);
+  }
+  function queueRequestError(response,context) {
+    var err=new Error(context+' HTTP '+response.status);
+    err.status=response.status;
+    err.authRefreshFailed=response.status===401;
+    return err;
+  }
+  async function sendQueuedObservation(item,current) {
+    var tab=item.mode==='Bovine Beacon'?'Bovine Beacon Log':'HeadCounter';
+    var prefix='https://sheets.googleapis.com/v4/spreadsheets/'+item.sheetId+'/values/';
+    function active() {
+      if(!current()) throw new Error('Operation changed during scan upload');
+    }
+    async function read(range) {
+      active();
+      var r=await fetchWithAuthRetry(prefix+encodeURIComponent(range),{cache:'no-store'},'scan reconciliation');
+      active();
+      if(!r.ok) throw queueRequestError(r,'Scan reconciliation');
+      var data=await r.json();active();return data.values||[];
+    }
+    active();
+    var rowNumber=null;
+    if(item.needsReconcile) {
+      if(item.sheetRow) {
+        var existing=await read("'"+tab+"'!A"+item.sheetRow);
+        if(existing[0] && String(existing[0][0])===item.id) rowNumber=item.sheetRow;
+      }
+      if(!rowNumber) {
+        var ids=await read("'"+tab+"'!A:A"),found=[];
+        ids.forEach(function(row,i){if(String(row[0])===item.id)found.push(i+1);});
+        if(found.length>1) throw new Error('Duplicate observation ID needs review: '+item.id);
+        rowNumber=found[0]||null;
+      }
+    }
+    active();
+    if(rowNumber) {
+      if(item.mode!=='Bovine Beacon') {
+        var updated=await fetchWithAuthRetry(prefix+encodeURIComponent("'"+tab+"'!J"+rowNumber)+'?valueInputOption=RAW',{
+          method:'PUT',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({values:[[item.record.readCount]]})
+        },'scan count update');
+        active();
+        if(!updated.ok) throw queueRequestError(updated,'Scan count update');
+      }
+      return rowNumber;
+    }
+    var range="'"+tab+"'!"+(item.mode==='Bovine Beacon'?'A:J':'A:M');
+    var values=item.mode==='Bovine Beacon'?beaconRow(item.record,item.record.targetTag):headCountRow(item.record);
+    var r=await fetchWithAuthRetry(prefix+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
+      method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({values:values})
+    },'queued scan append');
+    active();
+    if(!r.ok) throw queueRequestError(r,'Scan append');
+    var data=await r.json();active();
+    var match=String(data.updates&&data.updates.updatedRange||'').match(/!A(\d+):[A-Z]+\d+$/);
+    return match?Number(match[1]):null;
+  }
+  function flushOfflineQueue() {
+    if(queueFlushPromise) return queueFlushPromise;
+    if(!accessToken || !sheetId || (gatewayTenantMode && !operationId)) return Promise.resolve();
+    var epoch=onboardingAccountEpoch,owner=operationId,destination=sheetId;
+    function current(){return epoch===onboardingAccountEpoch && owner===operationId && destination===sheetId && !!accessToken;}
+    async function drain() {
+      while(current()) {
+        var q=queueLoad();
+        if(!q.length){setSheetsBar('ok','✅ All data synced — '+operationName);return;}
+        if(q[0].operationId && q[0].operationId !== operationId) {
+          debugLog('Offline queue held for another operation',{queuedOperation:q[0].operationId,currentOperation:operationId},'WARN');
+          setSheetsBar('err','⚠️ Saved scans belong to another operation.');return;
+        }
+        if(!q[0].operationId && gatewayTenantMode) {
+          debugLog('Legacy offline queue held; operation is unverified',{currentOperation:operationId},'WARN');
+          setSheetsBar('err','⚠️ Older saved scans need review before upload.');return;
+        }
+        var item=q[0];
+        if(item.sheetId && item.sheetId!==destination) throw new Error('Saved scan destination needs review');
+        // Recover eligible old entries without inventing their original session/author.
+        if(!item.id) {
+          item.id=item.mode==='Bovine Beacon'?newBeaconID():newHCID();
+          item.record.syncId=item.id;item.record.sessionId=item.record.sessionId||'';
+          item.record.operationName=item.record.operationName||'';
+          item.record.loggedBy=item.record.loggedBy||'';
+          item.sheetId=destination;item.needsReconcile=true;
+        }
+        item.record.syncId=item.id;
+        item.sheetId=item.sheetId||destination;
+        if(item.notBefore && item.notBefore>Date.now()) {
+          queueSave(q);scheduleQueueFlush(item.notBefore-Date.now());return;
+        }
+        // Durable uncertainty precedes mutation: reconcile this ID after lost replies.
+        var sent=JSON.parse(JSON.stringify(item));
+        item.needsReconcile=true;queueSave(q);
+        var rowNumber=await sendQueuedObservation(sent,current);
+        if(!current()) return;
+        q=queueLoad();
+        var live=q.filter(function(x){return x.id===sent.id && x.operationId===owner;})[0];
+        if(live && rowNumber){live.sheetRow=rowNumber;queueSave(q);}
+        queueRemove(sent.id,owner,Number(sent.record.readCount||0));
+        var key=sent.record.tag+'__'+sent.record.pasture;
+        var refKey=owner+'|'+sent.id;
+        var record=observationRefs[refKey]||uniqueTags[key];
+        if(record && record.syncId===sent.id) {
+          record.sheetRow=rowNumber||record.sheetRow;
+          record.synced=Number(record.readCount||0)===Number(sent.record.readCount||0);
+          if(record.synced) delete observationRefs[refKey];
+          renderTable();
+        }
+        debugLog('Offline record synced',{tag:sent.record.tag,observationId:sent.id,mode:sent.mode,remaining:queueLoad().length});
+      }
+    }
+    var pending=Promise.resolve().then(function(){
+      // Serialize this origin across supporting tabs, and every call in this page.
+      if(typeof navigator!=='undefined' && navigator.locks && navigator.locks.request)
+        return navigator.locks.request('reaper-scout-scan-queue',drain);
+      return drain();
+    }).catch(function(err){
+      debugLog('Offline sync incomplete',{message:err.message,status:err.status},'ERROR');
+      if(!current()) return;
+      if(err.authRefreshFailed) markAuthExpired('offline queue');
+      else setSheetsBar('err','📴 Sync incomplete — scans saved here. Tap for details.');
+    }).finally(function(){if(queueFlushPromise===pending)queueFlushPromise=null;});
+    queueFlushPromise=pending;
+    return pending;
   }
 
   // ── CHROME CHECK ──
@@ -1094,14 +1213,17 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
       if(r.status!==401) return r;
       debugLog('Google request received 401; refreshing',{context:context},'WARN');
-      return refreshAccessToken().then(function(){
-        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
-        options.headers.Authorization='Bearer '+accessToken;
-        return fetch(url,options);
-      }).catch(function(err){
+      return refreshAccessToken().catch(function(err){
         err.status=401;
         err.authRefreshFailed=true;
         throw err;
+      }).then(function(){
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
+        options.headers.Authorization='Bearer '+accessToken;
+        return fetch(url,options);
+      }).then(function(retried){
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed');
+        return retried;
       });
     });
   }
@@ -1152,7 +1274,9 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     signedInEmail='';
     animalRecordsCache=null;
     animalRecordsPromise=null;
-    debugLog('Signed out; local scan queue preserved',{queueCount:queueLoad().length});
+    debugLog('Signed out; local scan queue preserved',{queueCount:queueCountForStatus()});
+    if(animalLookupRetryTimer) clearTimeout(animalLookupRetryTimer);
+    animalLookupRetryTimer=null;
     if(bleDevice&&bleDevice.gatt.connected) bleDevice.gatt.disconnect();
     uniqueTags={};lastScanTime={};bbScans=[];
     var operationInput=document.getElementById('operationInput');
@@ -1206,7 +1330,8 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     setSheetsBar('ok','✅ Connected — '+operationName);
     renderSavedPastures();
     flushOfflineQueue();
-    setInterval(flushOfflineQueue, 30000);
+    if(queueFlushInterval) clearInterval(queueFlushInterval);
+    queueFlushInterval=setInterval(flushOfflineQueue, 30000);
   }
 
   // CREATE WORKSPACE
@@ -1277,29 +1402,20 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // SHEETS
   function setSheetsBar(state,msg){var el=document.getElementById('sheetsBar');if(!el)return;el.textContent=msg;el.className='status-bar sheets-'+state;}
   function writeToSheet(record, mode) {
-    var owner=operationId||null,epoch=onboardingAccountEpoch;
-    function holdRecord(err) {
-      record.synced=false;
+    var owner=record.operationId||operationId||null;
+    try {
       queueAdd(record,mode,owner);
-      debugLog('Record held for original operation',{tag:record.tag,operationId:owner,message:err&&err.message},'WARN');
-      if(epoch!==onboardingAccountEpoch) return;
+      record.synced=false;
       renderTable();
-      if(err&&err.authRefreshFailed)markAuthExpired('live write refresh');
-      else setSheetsBar('err','📴 Sync incomplete — record saved on this device.');
+      setSheetsBar('ok','⏳ Saving scans — '+operationName);
+    } catch(err) {
+      record.synced=false;
+      debugLog('Local scan save failed',{tag:record.tag,message:err.message},'ERROR');
+      setSheetsBar('err','❌ Local storage full or unavailable. Export scans before closing.');
+      return Promise.resolve();
     }
-    if(!accessToken||!sheetId||!operationId){holdRecord();return Promise.resolve();}
-    var range=mode==='Bovine Beacon'?"'Bovine Beacon Log'!A:J":'HeadCounter!A:M';
-    var row=mode==='Bovine Beacon'?beaconRow(record,bbTarget):headCountRow(record);
-    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'/values/'+encodeURIComponent(range)+':append?valueInputOption=RAW&insertDataOption=INSERT_ROWS',{
-      method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify({values:row})
-    },'live record append').then(function(r){
-      if(!r.ok){var error=new Error('Sheets append HTTP '+r.status);error.authRefreshFailed=r.status===401;throw error;}
-      record.synced=true;
-      if(epoch!==onboardingAccountEpoch) return;
-      renderTable();
-      debugLog('Record synced',{tag:record.tag,mode:mode});
-      setSheetsBar('ok','✅ Synced — '+operationName);
-    }).catch(holdRecord);
+    if(record.sheetRow){scheduleQueueFlush(1000);return Promise.resolve();}
+    return flushOfflineQueue();
   }
 
   // updateSheetWeather removed: the real sheet has no weather columns, and
@@ -1361,6 +1477,9 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if(uniqueTags[key]){
       uniqueTags[key].readCount++;
       uniqueTags[key].lastTime=timeStr;
+      writeToSheet(uniqueTags[key], 'Head Count');
+      if(uniqueTags[key].animalLookupError || uniqueTags[key].animal===undefined)
+        lookupAnimal(key,uniqueTags[key]);
       renderTable();updateStats();updateHeadcountBanner();
     } else {
       var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null,weather:null,animal:undefined};
@@ -1389,6 +1508,28 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // workbooks retain their legacy lookup; records are never migrated here.
   var animalRecordsCache = null; // fetched once per session, not per-scan
   var animalRecordsPromise = null;
+  var animalLookupRetryTimer = null;
+
+  async function fetchAnimalData(url,options,context) {
+    var epoch=onboardingAccountEpoch;
+    for(var attempt=0;attempt<2;attempt++) {
+      try {
+        var r=await fetchWithAuthRetry(url,options,context);
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed during animal lookup');
+        if(!r.ok) {var error=new Error('HTTP '+r.status+' reading '+context);error.status=r.status;throw error;}
+        var data=await r.json();
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed during animal lookup');
+        return data;
+      } catch(err) {
+        err.lookupStage=context;
+        debugLog('Animal data request failed',{stage:context,status:err.status,message:err.message,attempt:attempt+1},'ERROR');
+        var transient=!err.status || err.status===429 || err.status>=500;
+        if(attempt || !transient || epoch!==onboardingAccountEpoch || err.authRefreshFailed) throw err;
+        await new Promise(function(resolve){setTimeout(resolve,500);});
+        if(epoch!==onboardingAccountEpoch) throw new Error('Operation changed during animal lookup');
+      }
+    }
+  }
 
   function animalSchema(titles, id) {
     if(id===DCC_SHEET_ID) return 'legacy';
@@ -1414,12 +1555,9 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   function loadTab(tabName) {
     var range = encodeURIComponent(tabName) + '!A:BZ';
-    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + range, {
+    return fetchAnimalData('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values/' + range, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
-    },'animal lookup: '+tabName).then(function(r) {
-      if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading '+tabName); err.status=r.status; throw err; }
-      return r.json();
-    }).then(function(data) {
+    },'animal lookup: '+tabName).then(function(data) {
       var rows = data.values || [];
       if (rows.length < 2) return [];
       var headers = rows[0];
@@ -1446,12 +1584,9 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     var query = ranges.map(function(range) {
       return 'ranges=' + encodeURIComponent(range);
     }).join('&');
-    return fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values:batchGet?' + query, {
+    return fetchAnimalData('https://sheets.googleapis.com/v4/spreadsheets/' + sheetId + '/values:batchGet?' + query, {
       headers: { 'Authorization': 'Bearer ' + accessToken }
-    },'animal lookup: Ranch Tracker').then(function(r) {
-      if (!r.ok) { var err=new Error(r.status===401?'Google session rejected':'HTTP '+r.status+' reading Ranch Tracker'); err.status=r.status; throw err; }
-      return r.json();
-    }).then(function(data) {
+    },'animal lookup: Ranch Tracker').then(function(data) {
       var blocks = (data.valueRanges || []).map(function(block) { return block.values || []; });
       if (blocks.length !== ranges.length) throw new Error('Incomplete Ranch Tracker response');
       var rowCount = blocks.reduce(function(max, block) { return Math.max(max, block.length); }, 0);
@@ -1491,17 +1626,14 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if (animalRecordsCache) return Promise.resolve(animalRecordsCache);
     if (animalRecordsPromise) return animalRecordsPromise;
     var requestedSheet=sheetId;
-    var pending=fetchWithAuthRetry('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'?fields=sheets.properties.title',{},'animal schema').then(function(r){
-      if(!r.ok){var err=new Error('HTTP '+r.status+' reading workspace schema');err.status=r.status;throw err;}
-      return r.json();
-    }).then(function(data){
+    var pending=fetchAnimalData('https://sheets.googleapis.com/v4/spreadsheets/'+sheetId+'?fields=sheets.properties.title',{},'animal schema').then(function(data){
       var titles=(data.sheets||[]).map(function(s){return s.properties.title;});
       if(animalSchema(titles,requestedSheet)==='animals') return loadTab('Animals').then(animalsFromRows);
       return Promise.all([
       loadTab('Calf Tracker').then(function(rows) {
         return rows.map(function(r) {
           return {
-            source: 'Calf Tracker', tag: (r['Calf Tag'] || '').trim(), uhf: (r['UHF#'] || '').trim(),
+            source: 'Calf Tracker', tag: String(r['Calf Tag'] || '').trim(), uhf: String(r['UHF#'] || '').trim(),
             date: r['Date'] || '', color: r['Calf Color'] || '', sex: r['Calf Sex'] || '',
             type: r['Calf Type'] || '', dam_tag: r['Cow Tag'] || '', status: r['Status'] || '',
             notes: r['Calving Notes'] || ''
@@ -1522,25 +1654,66 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     return pending;
   }
 
-  function lookupAnimal(key, record) {
-    if (!sheetId || !accessToken || operationFeatures.animal_lookup === false) { record.animal = null; return; }
-    loadAnimalRecords().then(function(records) {
-      var match = records.filter(function(r) {
-        return r.tag === record.tag || (r.uhf && r.uhf === record.tag);
-      })[0];
-      record.animal = match || null;
-      record.animalLookupError = null;
-      debugLog(match?'Animal lookup matched':'Animal lookup completed; no linked record',{epc:record.tag,source:match&&match.source,animalTag:match&&match.tag},match?'INFO':'WARN');
-      renderTable();
-    }).catch(function(err) {
-      record.animal = null;
-      record.animalLookupError = err.message || 'Could not read animal records from Sheet';
-      debugLog('Animal lookup failed',{epc:record.tag,message:record.animalLookupError,status:err.status},'ERROR');
-      if(err.status===401)markAuthExpired('animal lookup');
-      renderTable();
+  function applyAnimalMatch(records,record) {
+    var match=records.filter(function(r){return r.tag===record.tag || (r.uhf && r.uhf===record.tag);})[0];
+    record.animal=match||null;
+    record.animalLookupError=null;
+    record.animalLookupRetryAt=0;
+    record.animalLookupAttempts=0;
+    debugLog(match?'Animal lookup matched':'Animal lookup completed; no linked record',
+      {epc:record.tag,source:match&&match.source,animalTag:match&&match.tag},match?'INFO':'WARN');
+  }
+  function retryFailedLookups() {
+    if(animalLookupRetryTimer) clearTimeout(animalLookupRetryTimer);
+    animalLookupRetryTimer=null;
+    Object.keys(uniqueTags).forEach(function(key){
+      var r=uniqueTags[key];
+      if(r.animalLookupError && r.animalLookupRetryable && (r.animalLookupAttempts||0)<3)
+        lookupAnimal(key,r);
     });
   }
+  function lookupAnimal(key, record) {
+    if (!sheetId || !accessToken || operationFeatures.animal_lookup === false) { record.animal = null; return Promise.resolve(); }
+    if(record.animalLookupPending) return record.animalLookupPending;
+    if(record.animalLookupRetryAt && Date.now()<record.animalLookupRetryAt) return Promise.resolve();
+    var epoch=onboardingAccountEpoch,requestedSheet=sheetId;
+    record.animalLookupAttempts=(record.animalLookupAttempts||0)+1;
+    var pending=loadAnimalRecords().then(function(records) {
+      if(epoch!==onboardingAccountEpoch || requestedSheet!==sheetId || uniqueTags[key]!==record) return;
+      applyAnimalMatch(records,record);
+      // A later successful load also repairs errors left on earlier observations.
+      Object.keys(uniqueTags).forEach(function(k){
+        var other=uniqueTags[k];
+        if(other!==record && other.animalLookupError) applyAnimalMatch(records,other);
+      });
+      renderTable();
+    }).catch(function(err) {
+      if(epoch!==onboardingAccountEpoch || requestedSheet!==sheetId || uniqueTags[key]!==record) return;
+      record.animal=null;
+      record.animalLookupError=err.message||'Could not read animal records from Sheet';
+      record.animalLookupRetryable=(!err.status || err.status===429 || err.status>=500) && !err.authRefreshFailed;
+      record.animalLookupRetryAt=Date.now()+2500;
+      debugLog('Animal lookup failed',{epc:record.tag,message:record.animalLookupError,
+        status:err.status,stage:err.lookupStage},'ERROR');
+      if(err.status===401) markAuthExpired('animal lookup');
+      if(record.animalLookupRetryable && record.animalLookupAttempts<3 && !animalLookupRetryTimer)
+        animalLookupRetryTimer=setTimeout(retryFailedLookups,3000);
+      renderTable();
+    }).finally(function(){if(record.animalLookupPending===pending)record.animalLookupPending=null;});
+    record.animalLookupPending=pending;
+    return pending;
+  }
 
+  window.addEventListener('online',function(){
+    Object.keys(uniqueTags).forEach(function(k){
+      uniqueTags[k].animalLookupRetryAt=0;uniqueTags[k].animalLookupAttempts=0;
+    });
+    retryFailedLookups();
+    flushOfflineQueue();
+  });
+  window.addEventListener('storage',function(e){
+    if(e.key===QUEUE_KEY) scheduleQueueFlush(1000);
+  });
 
   window.showAnimalModal = function(key) {
     var r = uniqueTags[key];
