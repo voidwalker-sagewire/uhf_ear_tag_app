@@ -107,21 +107,22 @@ test('cancelled refresh clears its promise and cannot replace the new account to
   await assert.rejects(pending,/Sign-in cancelled/);
   assert.equal(c.tokenRefreshPromise,null);assert.equal(c.accessToken,'new-account-token');
 });
-test('late failed scan write keeps its original operation in the offline queue',async()=>{
-  let release;const queued=[];
-  const c=context({operationId:'a',sheetId:'sheet-a',fetchWithAuthRetry:()=>new Promise(r=>release=r),
-    queueAdd:(record,mode,owner)=>queued.push({record,mode,owner}),renderTable(){},setSheetsBar(){},
-    headCountRow:()=>[['test']],markAuthExpired(){throw Error('must not expire new account');}});
-  vm.runInContext(section('  function writeToSheet(', '  // updateSheetWeather removed:'),c);
-  const pending=c.writeToSheet({tag:'0001'},'Head Count');
+test('failed scan upload retains original operation across account switch',async()=>{
+  const {scanner,tick}=require('./helpers/scanner.cjs');
+  let release;
+  const c=scanner({operationId:'a',sheetId:'sheet-a',fetchWithAuthRetry:()=>new Promise(r=>release=r)});
+  const pending=c.writeToSheet({tag:'0001',readCount:1},'Head Count');
+  await tick();
   c.onboardingAccountEpoch++;c.operationId='b';c.sheetId='sheet-b';
   release({ok:false,status:401});await pending;
-  assert.equal(queued.length,1);assert.equal(queued[0].owner,'a');
+  const queued=c.queueLoad();
+  assert.equal(queued.length,1);assert.equal(queued[0].operationId,'a');
+  assert.equal(queued[0].sheetId,'sheet-a');
 });
 test('queue storage preserves an explicit original owner rather than current account',()=>{
-  let items=[];
-  const c=context({operationId:'b',queueLoad:()=>items,queueSave:q=>items=q});
-  vm.runInContext(section('  function queueAdd(', '  function queueRemove('),c);
+  const {scanner}=require('./helpers/scanner.cjs');
+  const c=scanner({operationId:'b'});
   c.queueAdd({tag:'a-tag'},'Head Count','a');c.queueAdd({tag:'b-tag'},'Head Count');
+  const items=c.queueLoad();
   assert.equal(items[0].operationId,'a');assert.equal(items[1].operationId,'b');
 });
