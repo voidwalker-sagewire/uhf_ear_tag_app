@@ -1654,8 +1654,16 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     return pending;
   }
 
+  // Compare identifier formatting without rewriting the stored or scanned EPC.
+  // Keep leading zeros and non-whitespace characters significant.
+  function uhfLookupKey(value) {
+    return String(value == null ? '' : value).replace(/\s/g,'');
+  }
   function applyAnimalMatch(records,record) {
-    var match=records.filter(function(r){return r.tag===record.tag || (r.uhf && r.uhf===record.tag);})[0];
+    var scannedUhf=uhfLookupKey(record.tag);
+    var match=records.filter(function(r){
+      return r.tag===record.tag || (scannedUhf && uhfLookupKey(r.uhf)===scannedUhf);
+    })[0];
     record.animal=match||null;
     record.animalLookupError=null;
     record.animalLookupRetryAt=0;
