@@ -1061,11 +1061,13 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       if (raw && raw.length >= 8) debugLog('Invalid EPC rejected',{value:raw,rule:'DCC tags must be exactly 15 digits'},'WARN');
       return;
     }
-    if (isDebounceDuplicate(raw)) return;
     if (currentMode === 'hc') {
+      // A paused scan must not prime the debounce for a later resumed scan.
       if (!currentPasture || headCountPaused) return;
+      if (isDebounceDuplicate(raw)) return;
       processHCTag(raw);
     } else if (currentMode === 'bb') {
+      if (isDebounceDuplicate(raw)) return;
       processBBScan(raw);
     }
   }
