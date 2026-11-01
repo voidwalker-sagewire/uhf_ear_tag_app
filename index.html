@@ -409,6 +409,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
         <input id="tagInput" type="text" placeholder="Set pasture first..." disabled autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
         <button id="addBtn" disabled onclick="addTag()">SCAN</button>
       </div>
+      <button id="captureToggle" type="button" disabled onclick="toggleHeadCountCapture()" style="margin:8px 12px 0;min-height:48px;width:calc(100% - 24px);font-weight:700;border:2px solid var(--orange);background:var(--panel2);color:var(--orange);border-radius:8px;">⏸ Stop Capture</button>
     </div>
     <div class="headcount-banner" id="headcountBanner" style="display:none">
       <div class="headcount-num" id="headcountNum">0</div>
@@ -528,6 +529,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // STATE
   var uniqueTags = {};
   var currentPasture = '';
+  var headCountPaused = false;
   var filterPasture = 'all';
   var dayMode = localStorage.getItem('hm_day_mode') === '1';
   var lastGPS = null;
@@ -793,7 +795,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
           record.sheetRow=rowNumber||record.sheetRow;
           record.synced=Number(record.readCount||0)===Number(sent.record.readCount||0);
           if(record.synced) delete observationRefs[refKey];
-          renderTable();
+          scheduleHCVisualRefresh();
         }
         debugLog('Offline record synced',{tag:sent.record.tag,observationId:sent.id,mode:sent.mode,remaining:queueLoad().length});
       }
@@ -1061,7 +1063,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     }
     if (isDebounceDuplicate(raw)) return;
     if (currentMode === 'hc') {
-      if (!currentPasture) return;
+      if (!currentPasture || headCountPaused) return;
       processHCTag(raw);
     } else if (currentMode === 'bb') {
       processBBScan(raw);
@@ -1094,6 +1096,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   // MODE SWITCH
   window.switchMode=function(mode){
+    if(currentMode==='hc' && mode!=='hc')flushPendingReadUpdates();
     currentMode=mode;
     document.getElementById('tabHC').className='mode-tab'+(mode==='hc'?' active-hc':'');
     document.getElementById('tabBB').className='mode-tab'+(mode==='bb'?' active-bb':'');
@@ -1406,7 +1409,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     try {
       queueAdd(record,mode,owner);
       record.synced=false;
-      renderTable();
+      scheduleHCVisualRefresh();
       setSheetsBar('ok','⏳ Saving scans — '+operationName);
     } catch(err) {
       record.synced=false;
@@ -1439,7 +1442,12 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   window.setPasture=function(){
     var name=document.getElementById('pastureInput').value.trim();
     if(!name){showToast('Enter a pasture name',true);return;}
+    flushPendingReadUpdates();
     currentPasture=name;
+    headCountPaused=false;
+    document.getElementById('captureToggle').disabled=false;
+    document.getElementById('captureToggle').textContent='⏸ Stop Capture';
+    document.getElementById('addBtn').disabled=false;
     document.getElementById('pastureInput').value='';
     document.getElementById('activeName').textContent=name;
     document.getElementById('activeName').className='active-name';
@@ -1461,13 +1469,60 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   window.addTag=function(){
     var raw=document.getElementById('tagInput').value.trim().toUpperCase();
-    if(!raw||!currentPasture)return;
     document.getElementById('tagInput').value='';
+    if(!raw||!currentPasture||headCountPaused)return;
     processIncomingTag(raw);
     document.getElementById('tagInput').focus();
   };
 
+  // Keep RFID capture cheap: batch repeat-count persistence and visual rendering.
+  // New unique EPCs still enter the durable local queue immediately.
+  var pendingReadUpdates=Object.create(null),pendingReadTimer=null,visualTimer=null,tabsDirty=false;
+  function flushPendingReadUpdates(){
+    if(pendingReadTimer!==null){clearTimeout(pendingReadTimer);pendingReadTimer=null;}
+    var updates=pendingReadUpdates;
+    pendingReadUpdates=Object.create(null);
+    Object.keys(updates).forEach(function(k){writeToSheet(updates[k],'Head Count');});
+  }
+  function scheduleReadUpdate(key,record){
+    pendingReadUpdates[key]=record;
+    if(pendingReadTimer===null)pendingReadTimer=setTimeout(flushPendingReadUpdates,250);
+  }
+  function scheduleHCVisualRefresh(includeTabs){
+    if(includeTabs)tabsDirty=true;
+    if(visualTimer!==null)return;
+    visualTimer=setTimeout(function(){
+      visualTimer=null;
+      renderTable();
+      if(tabsDirty){tabsDirty=false;renderTabs();}
+      updateStats();updateHeadcountBanner();
+    },160);
+  }
+  if(typeof window!=='undefined' && window.addEventListener)
+    window.addEventListener('pagehide',flushPendingReadUpdates);
+  if(typeof document!=='undefined' && document.addEventListener)
+    document.addEventListener('visibilitychange',function(){if(document.hidden)flushPendingReadUpdates();});
+  window.toggleHeadCountCapture=function(){
+    if(!currentPasture)return;
+    headCountPaused=!headCountPaused;
+    var input=document.getElementById('tagInput');
+    var toggle=document.getElementById('captureToggle');
+    input.value='';
+    input.disabled=false; // Keep keyboard-wedge focus here and discard scans while paused.
+    document.getElementById('addBtn').disabled=headCountPaused;
+    toggle.textContent=headCountPaused?'▶ Resume Capture':'⏸ Stop Capture';
+    document.getElementById('scanHint').textContent=headCountPaused
+      ?'Capture stopped — saved reads retained; sync may continue'
+      :'Ready — scanning: '+currentPasture;
+    if(headCountPaused){
+      flushPendingReadUpdates();
+      debugLog('Head Count capture stopped',{pasture:currentPasture,unique:Object.keys(uniqueTags).length});
+    }
+    input.focus();
+    scheduleHCVisualRefresh();
+  };
   function processHCTag(raw) {
+    if(headCountPaused)return;
     playScanTick();
     var now=new Date();
     var timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
@@ -1477,18 +1532,18 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if(uniqueTags[key]){
       uniqueTags[key].readCount++;
       uniqueTags[key].lastTime=timeStr;
-      writeToSheet(uniqueTags[key], 'Head Count');
+      scheduleReadUpdate(key,uniqueTags[key]);
       if(uniqueTags[key].animalLookupError || uniqueTags[key].animal===undefined)
         lookupAnimal(key,uniqueTags[key]);
-      renderTable();updateStats();updateHeadcountBanner();
+      scheduleHCVisualRefresh();
     } else {
       var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null,weather:null,animal:undefined};
       uniqueTags[key]=record;
       var zone=document.getElementById('scanZone');
       zone.className='scan-zone lit';
       setTimeout(function(){zone.className='scan-zone';},350);
-      renderTable();renderTabs();updateStats();updateHeadcountBanner();
-      showToast('NEW: '+raw);
+      scheduleHCVisualRefresh(true);
+      // Avoid one toast for every EPC during dense inventory.
       // Write to sheet immediately with whatever we have
       // Then fetch weather and update the record display
       writeToSheet(record, 'Head Count');
@@ -1496,7 +1551,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       if (gps) {
         fetchWeather(gps.lat, gps.lng, function(weather) {
           record.weather = weather;
-          renderTable();
+          scheduleHCVisualRefresh();
           // Write a second row update with weather data appended
           updateSheetWeather(record);
         });
@@ -1694,7 +1749,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
         var other=uniqueTags[k];
         if(other!==record && other.animalLookupError) applyAnimalMatch(records,other);
       });
-      renderTable();
+      scheduleHCVisualRefresh();
     }).catch(function(err) {
       if(epoch!==onboardingAccountEpoch || requestedSheet!==sheetId || uniqueTags[key]!==record) return;
       record.animal=null;
@@ -1706,7 +1761,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       if(err.status===401) markAuthExpired('animal lookup');
       if(record.animalLookupRetryable && record.animalLookupAttempts<3 && !animalLookupRetryTimer)
         animalLookupRetryTimer=setTimeout(retryFailedLookups,3000);
-      renderTable();
+      scheduleHCVisualRefresh();
     }).finally(function(){if(record.animalLookupPending===pending)record.animalLookupPending=null;});
     record.animalLookupPending=pending;
     return pending;
@@ -1943,22 +1998,22 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   var lastWeatherCoords = null;
   var WEATHER_CACHE_MS = 5 * 60 * 1000; // cache 5 minutes
 
-  function fetchWeather(lat, lng, callback) {
-    var now = Date.now();
-    if (lastWeather && (now - lastWeatherFetch) < WEATHER_CACHE_MS) {
-      callback(lastWeather);
-      return;
+  var pendingWeatherByLocation=Object.create(null);
+  function fetchWeather(lat,lng,callback) {
+    var locationKey=(Math.round(lat*1000)/1000)+','+(Math.round(lng*1000)/1000);
+    if(lastWeather && lastWeatherCoords===locationKey &&
+       Date.now()-lastWeatherFetch<WEATHER_CACHE_MS){callback(lastWeather);return;}
+    if(!pendingWeatherByLocation[locationKey]){
+      pendingWeatherByLocation[locationKey]=fetch('https://weather.herdmate.ag/weather?lat='+lat+'&lng='+lng)
+        .then(function(r){if(!r.ok)throw new Error('Weather HTTP '+r.status);return r.json();})
+        .then(function(data){
+          if(data.temp===undefined || data.temp===null)throw new Error('No weather data');
+          lastWeather=data;lastWeatherFetch=Date.now();lastWeatherCoords=locationKey;
+          return data;
+        }).catch(function(err){debugLog('Weather lookup failed',{message:err.message},'ERROR');return null;})
+        .finally(function(){delete pendingWeatherByLocation[locationKey];});
     }
-    fetch('https://weather.herdmate.ag/weather?lat=' + lat + '&lng=' + lng)
-    .then(function(r) { if(!r.ok)throw new Error('Weather HTTP '+r.status); return r.json(); })
-    .then(function(data) {
-      if (!data.temp) throw new Error('No weather data');
-      lastWeather = data;
-      lastWeatherFetch = Date.now();
-      debugLog('Weather received',{source:'direct weather service'});
-      callback(data);
-    })
-    .catch(function(err) { debugLog('Weather lookup failed',{message:err.message},'ERROR'); callback(null); });
+    pendingWeatherByLocation[locationKey].then(callback);
   }
 
   // ── JAWS HAPTICS ──
