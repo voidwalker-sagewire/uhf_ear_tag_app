@@ -8,14 +8,14 @@ function scanner(extra={}){
     document:{getElementById:()=>({className:''})},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},
     DCC_SHEET_ID:'dcc-sheet',sheetId:'dcc-sheet',operationId:'dcc',operationName:'DCC',signedInEmail:'owner@example.com',sessionId:'session-original',
     accessToken:'fake',onboardingAccountEpoch:0,gatewayTenantMode:true,operationFeatures:{animal_lookup:true},
-    bbTarget:'',uniqueTags:{},currentPasture:'Barn',lastGPS:null,
+    bbTarget:'',uniqueTags:{},currentPasture:'Barn',headCountPaused:false,lastGPS:null,
     newHCID:()=> 'H-'+require('node:crypto').randomUUID(),newBeaconID:()=> 'B-'+require('node:crypto').randomUUID(),
     debugLog(){},setSheetsBar(){},renderTable(){},renderTabs(){},updateStats(){},updateHeadcountBanner(){},showToast(){},playScanTick(){},markAuthExpired(){},
     ...extra});
   vm.runInContext(section('  function headCountRow(', '  var sheetId ='),c);
   vm.runInContext(section('  var QUEUE_KEY =','  // ── CHROME CHECK'),c);
   vm.runInContext(section('  function writeToSheet(', '  // updateSheetWeather removed:'),c);
-  vm.runInContext(section('  function processHCTag(', '  // Animals is the new-account schema.'),c);
+  vm.runInContext(section('  // Keep RFID capture cheap:', '  // Animals is the new-account schema.'),c);
   vm.runInContext(section('  var animalRecordsCache =','  window.showAnimalModal ='),c);
   c.storage=storage;c.timers=timers;c.events=events;
   return c;
