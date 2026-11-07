@@ -409,7 +409,8 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
         <input id="tagInput" type="text" placeholder="Set pasture first..." disabled autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" />
         <button id="addBtn" disabled onclick="addTag()">SCAN</button>
       </div>
-      <button id="captureToggle" type="button" disabled onclick="toggleHeadCountCapture()" style="margin:8px 12px 0;min-height:48px;width:calc(100% - 24px);font-weight:700;border:2px solid var(--orange);background:var(--panel2);color:var(--orange);border-radius:8px;">⏸ Stop Capture</button>
+      <button id="captureToggle" type="button" disabled onclick="toggleHeadCountCapture()" style="margin:8px 12px 0;min-height:48px;width:calc(100% - 24px);font-weight:700;border:2px solid var(--orange);background:var(--panel2);color:var(--orange);border-radius:8px;">⏸ Pause accepting scans</button>
+      <div id="captureProgress" role="status" aria-live="polite" style="padding:10px 12px;line-height:1.5;font-size:0.85rem;">Set a pasture to begin. Reader backlog is not available.</div>
     </div>
     <div class="headcount-banner" id="headcountBanner" style="display:none">
       <div class="headcount-num" id="headcountNum">0</div>
@@ -636,6 +637,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   }
   function queueSave(q) {
     localStorage.setItem(QUEUE_KEY,JSON.stringify(q));
+    if(typeof scheduleHCVisualRefresh==='function')scheduleHCVisualRefresh();
   }
   function queueCountForStatus() {
     try {return queueLoad().length;} catch(e) {return 'unreadable';}
@@ -810,7 +812,10 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       if(!current()) return;
       if(err.authRefreshFailed) markAuthExpired('offline queue');
       else setSheetsBar('err','📴 Sync incomplete — scans saved here. Tap for details.');
-    }).finally(function(){if(queueFlushPromise===pending)queueFlushPromise=null;});
+    }).finally(function(){
+      if(queueFlushPromise===pending)queueFlushPromise=null;
+      if(typeof scheduleHCVisualRefresh==='function')scheduleHCVisualRefresh();
+    });
     queueFlushPromise=pending;
     return pending;
   }
@@ -1001,6 +1006,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   }
 
   function onBleData(event) {
+    if(currentMode==='hc' && headCountPaused){bleBuffer='';return;}
     var value = event.target.value;
     var decoder = new TextDecoder('utf-8');
     var chunk = decoder.decode(value);
@@ -1056,6 +1062,8 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   // ── PROCESS INCOMING TAG (from BLE or keyboard wedge) ──
   function processIncomingTag(raw) {
+    // Reject paused input before validation/logging and debounce work.
+    if(currentMode==='hc' && headCountPaused)return;
     if(!accessToken||!operationId||!sheetId)return;
     if (!isValidCattleTag(raw)) {
       if (raw && raw.length >= 8) debugLog('Invalid EPC rejected',{value:raw,rule:'DCC tags must be exactly 15 digits'},'WARN');
@@ -1438,7 +1446,8 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 
   // HEAD COUNT
   document.getElementById('pastureInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();setPasture();}});
-  document.getElementById('tagInput').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();addTag();}});
+  document.getElementById('tagInput').addEventListener('keydown',handleHeadCountKeydown);
+  document.getElementById('tagInput').addEventListener('input',function(e){if(headCountPaused)e.target.value='';});
   document.getElementById('targetInput').addEventListener('input',function(){updateHeadcountBanner();});
 
   window.setPasture=function(){
@@ -1448,7 +1457,10 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     currentPasture=name;
     headCountPaused=false;
     document.getElementById('captureToggle').disabled=false;
-    document.getElementById('captureToggle').textContent='⏸ Stop Capture';
+    document.getElementById('captureToggle').textContent='⏸ Pause accepting scans';
+    document.getElementById('tagInput').readOnly=false;
+    document.getElementById('tagInput').value='';
+    bleBuffer='';
     document.getElementById('addBtn').disabled=false;
     document.getElementById('pastureInput').value='';
     document.getElementById('activeName').textContent=name;
@@ -1467,6 +1479,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     document.getElementById('tagInput').focus();
     showToast('Pasture: '+name);
     renderTabs();
+    scheduleHCVisualRefresh();
   };
 
   window.addTag=function(){
@@ -1480,6 +1493,30 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // Keep RFID capture cheap: batch repeat-count persistence and visual rendering.
   // New unique EPCs still enter the durable local queue immediately.
   var pendingReadUpdates=Object.create(null),pendingReadTimer=null,visualTimer=null,tabsDirty=false;
+  function handleHeadCountKeydown(e){
+    if(headCountPaused){
+      // Keep wedge focus here; prevent typed EPCs appearing while paused.
+      if(e.key==='Enter' || e.key.length===1)e.preventDefault();
+      document.getElementById('tagInput').value='';
+      return;
+    }
+    if(e.key==='Enter'){e.preventDefault();window.addTag();}
+  }
+  function updateCaptureProgress(){
+    var el=document.getElementById('captureProgress');
+    if(!el)return;
+    var pending=Object.keys(pendingReadUpdates||{}).length;
+    var text=headCountPaused?'PAUSED — new scans ignored. Reader may still be searching.':'Accepting scans.';
+    try{
+      var q=queueLoad(),mine=q.filter(function(x){return x.operationId===operationId && (!x.sheetId || x.sheetId===sheetId);}).length;
+      text+=' '+mine+' saved observation'+(mine===1?'':'s')+' waiting for upload'+(queueFlushPromise?' (sync working).':'.');
+      if(q.length>mine)text+=' '+(q.length-mine)+' saved observations held for another destination.';
+      if(pending)text+=' Repeat counts for '+pending+' tags waiting for local save.';
+      if(!q.length && !pending)text+=' Saved upload queue is empty.';
+    }catch(err){text+=' Saved queue unreadable — export scans and open sync details.';}
+    text+=' Reader backlog is not available; check sync details for errors.';
+    if(el.textContent!==text)el.textContent=text;
+  }
   function flushPendingReadUpdates(){
     if(pendingReadTimer!==null){clearTimeout(pendingReadTimer);pendingReadTimer=null;}
     var updates=pendingReadUpdates;
@@ -1498,6 +1535,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       renderTable();
       if(tabsDirty){tabsDirty=false;renderTabs();}
       updateStats();updateHeadcountBanner();
+      updateCaptureProgress();
     },160);
   }
   if(typeof window!=='undefined' && window.addEventListener)
@@ -1511,10 +1549,13 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     var toggle=document.getElementById('captureToggle');
     input.value='';
     input.disabled=false; // Keep keyboard-wedge focus here and discard scans while paused.
+    input.readOnly=headCountPaused;
+    input.placeholder=headCountPaused?'Paused — new scans ignored':'Scan or type EPC tag...';
+    bleBuffer=''; // Do not join a pre-pause BLE fragment to resumed data.
     document.getElementById('addBtn').disabled=headCountPaused;
-    toggle.textContent=headCountPaused?'▶ Resume Capture':'⏸ Stop Capture';
+    toggle.textContent=headCountPaused?'▶ Resume accepting scans':'⏸ Pause accepting scans';
     document.getElementById('scanHint').textContent=headCountPaused
-      ?'Capture stopped — saved reads retained; sync may continue'
+      ?'Paused — new scans ignored; saved scans can still sync'
       :'Ready — scanning: '+currentPasture;
     if(headCountPaused){
       flushPendingReadUpdates();
@@ -2224,3 +2265,4 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
 </script>
 </body>
 </html>
+
