@@ -576,6 +576,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   var bbTarget = '', bbPasture = '', bbScans = [], bbFound = false, bbActive = false;
   var audioScanOn = false, audioAlertOn = true, vibOn = true, audioCtx = null;
   var lastScanTime = {};
+  var HC_SESSION_PREFIX = 'hm_headcount_session_v1:';
   var DEBUG_KEY = 'hm_debug_log_v1';
   var DEBUG_LIMIT = 200;
 
@@ -1337,11 +1338,16 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   }
   function launchApp() {
     sessionId = 'S-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7).toUpperCase();
+    var restoredHeadCount = restoreHeadCountSession();
     document.getElementById('operationName').textContent=operationName;
     showScreen('appScreen');
     startGPS();
     setSheetsBar('ok','✅ Connected — '+operationName);
     renderSavedPastures();
+    if(restoredHeadCount) {
+      applyRestoredHeadCountUI();
+      showToast('Restored '+Object.keys(uniqueTags).length+' scanned tags','good');
+    }
     flushOfflineQueue();
     if(queueFlushInterval) clearInterval(queueFlushInterval);
     queueFlushInterval=setInterval(flushOfflineQueue, 30000);
@@ -1455,6 +1461,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if(!name){showToast('Enter a pasture name',true);return;}
     flushPendingReadUpdates();
     currentPasture=name;
+    scheduleHeadCountSessionSave(true);
     headCountPaused=false;
     document.getElementById('captureToggle').disabled=false;
     document.getElementById('captureToggle').textContent='⏸ Pause accepting scans';
@@ -1493,6 +1500,78 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   // Keep RFID capture cheap: batch repeat-count persistence and visual rendering.
   // New unique EPCs still enter the durable local queue immediately.
   var pendingReadUpdates=Object.create(null),pendingReadTimer=null,visualTimer=null,tabsDirty=false;
+  var headCountSessionTimer=null;
+  function headCountSessionKey(){
+    return HC_SESSION_PREFIX+encodeURIComponent(operationId||'')+'|'+encodeURIComponent(sheetId||'');
+  }
+  function headCountSnapshotRecord(record){
+    return {
+      tag:record.tag,pasture:record.pasture,firstTime:record.firstTime,firstDate:record.firstDate,
+      lastTime:record.lastTime,firstGPS:record.firstGPS,readCount:record.readCount,
+      synced:record.synced,syncId:record.syncId,sessionId:record.sessionId,
+      operationId:record.operationId,sheetId:record.sheetId,operationName:record.operationName,
+      loggedBy:record.loggedBy,sheetRow:record.sheetRow
+    };
+  }
+  function saveHeadCountSession(){
+    if(headCountSessionTimer!==null){clearTimeout(headCountSessionTimer);headCountSessionTimer=null;}
+    if(!operationId||!sheetId)return;
+    var records={};
+    Object.keys(uniqueTags).forEach(function(key){records[key]=headCountSnapshotRecord(uniqueTags[key]);});
+    try{
+      localStorage.setItem(headCountSessionKey(),JSON.stringify({
+        version:1,operationId:operationId,sheetId:sheetId,sessionId:sessionId,
+        currentPasture:currentPasture,filterPasture:filterPasture,records:records,savedAt:Date.now()
+      }));
+    }catch(err){
+      debugLog('Head Count session save failed',{message:err.message},'ERROR');
+      setSheetsBar('err','❌ Local session storage unavailable. Export scans before closing.');
+    }
+  }
+  function scheduleHeadCountSessionSave(immediate){
+    if(immediate){saveHeadCountSession();return;}
+    if(headCountSessionTimer===null)headCountSessionTimer=setTimeout(saveHeadCountSession,1000);
+  }
+  function restoreHeadCountSession(){
+    if(!operationId||!sheetId)return false;
+    var saved;
+    try{saved=JSON.parse(localStorage.getItem(headCountSessionKey())||'null');}
+    catch(err){debugLog('Head Count session unreadable',{message:err.message},'ERROR');return false;}
+    if(!saved||saved.version!==1||saved.operationId!==operationId||saved.sheetId!==sheetId||!saved.records)return false;
+    uniqueTags={};
+    Object.keys(saved.records).forEach(function(key){
+      var record=saved.records[key];
+      if(!record||!/^\d{15}$/.test(String(record.tag||''))||!record.pasture)return;
+      record.readCount=Math.max(1,Number(record.readCount)||1);
+      record.animal=undefined;
+      uniqueTags[key]=record;
+      if(record.syncId)observationRefs[operationId+'|'+record.syncId]=record;
+    });
+    if(!Object.keys(uniqueTags).length)return false;
+    sessionId=saved.sessionId||sessionId;
+    currentPasture=saved.currentPasture||'';
+    filterPasture=saved.filterPasture||'all';
+    lastScanTime={};
+    debugLog('Head Count session restored',{tags:Object.keys(uniqueTags).length,pasture:currentPasture,savedAt:saved.savedAt});
+    return true;
+  }
+  function applyRestoredHeadCountUI(){
+    if(!currentPasture)return;
+    var input=document.getElementById('tagInput');
+    document.getElementById('captureToggle').disabled=false;
+    document.getElementById('captureToggle').textContent='⏸ Pause accepting scans';
+    input.disabled=false;input.readOnly=false;input.value='';
+    input.placeholder='Scan or type EPC tag...';
+    document.getElementById('addBtn').disabled=false;
+    document.getElementById('activeName').textContent=currentPasture;
+    document.getElementById('activeName').className='active-name';
+    document.getElementById('scanDot').className='dot blink';
+    document.getElementById('scanHint').textContent='Restored — scanning: '+currentPasture;
+    document.getElementById('scanHint').className='scan-hint';
+    document.getElementById('headcountBanner').style.display='flex';
+    document.getElementById('headcountPasture').textContent=currentPasture;
+    renderTabs();scheduleHCVisualRefresh();
+  }
   function handleHeadCountKeydown(e){
     if(headCountPaused){
       // Keep wedge focus here; prevent typed EPCs appearing while paused.
@@ -1525,7 +1604,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   }
   function scheduleReadUpdate(key,record){
     pendingReadUpdates[key]=record;
-    if(pendingReadTimer===null)pendingReadTimer=setTimeout(flushPendingReadUpdates,250);
+    if(pendingReadTimer===null)pendingReadTimer=setTimeout(flushPendingReadUpdates,5000);
   }
   function scheduleHCVisualRefresh(includeTabs){
     if(includeTabs)tabsDirty=true;
@@ -1536,12 +1615,12 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       if(tabsDirty){tabsDirty=false;renderTabs();}
       updateStats();updateHeadcountBanner();
       updateCaptureProgress();
-    },160);
+    },500);
   }
   if(typeof window!=='undefined' && window.addEventListener)
-    window.addEventListener('pagehide',flushPendingReadUpdates);
+    window.addEventListener('pagehide',function(){flushPendingReadUpdates();saveHeadCountSession();});
   if(typeof document!=='undefined' && document.addEventListener)
-    document.addEventListener('visibilitychange',function(){if(document.hidden)flushPendingReadUpdates();});
+    document.addEventListener('visibilitychange',function(){if(document.hidden){flushPendingReadUpdates();saveHeadCountSession();}});
   window.toggleHeadCountCapture=function(){
     if(!currentPasture)return;
     headCountPaused=!headCountPaused;
@@ -1559,6 +1638,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       :'Ready — scanning: '+currentPasture;
     if(headCountPaused){
       flushPendingReadUpdates();
+      saveHeadCountSession();
       debugLog('Head Count capture stopped',{pasture:currentPasture,unique:Object.keys(uniqueTags).length});
     }
     input.focus();
@@ -1566,7 +1646,6 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
   };
   function processHCTag(raw) {
     if(headCountPaused)return;
-    playScanTick();
     var now=new Date();
     var timeStr=now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     var dateStr=now.toLocaleDateString();
@@ -1576,10 +1655,11 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       uniqueTags[key].readCount++;
       uniqueTags[key].lastTime=timeStr;
       scheduleReadUpdate(key,uniqueTags[key]);
-      if(uniqueTags[key].animalLookupError || uniqueTags[key].animal===undefined)
-        lookupAnimal(key,uniqueTags[key]);
+      if(uniqueTags[key].animalLookupError)lookupAnimal(key,uniqueTags[key]);
+      scheduleHeadCountSessionSave(false);
       scheduleHCVisualRefresh();
     } else {
+      playScanTick();
       var record={tag:raw,pasture:currentPasture,firstTime:timeStr,firstDate:dateStr,lastTime:timeStr,firstGPS:gps,readCount:1,synced:null,weather:null,animal:undefined};
       uniqueTags[key]=record;
       var zone=document.getElementById('scanZone');
@@ -1590,6 +1670,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
       // Write to sheet immediately with whatever we have
       // Then fetch weather and update the record display
       writeToSheet(record, 'Head Count');
+      scheduleHeadCountSessionSave(true);
       lookupAnimal(key, record);
       if (gps) {
         fetchWeather(gps.lat, gps.lng, function(weather) {
@@ -2003,6 +2084,7 @@ if (location.hostname === 'herdmate.ag' && location.pathname === '/' && !new URL
     if(!Object.keys(uniqueTags).length&&!bbScans.length)return;
     if(!confirm('Clear scan data?\n\nData already synced to Google Sheets is kept there.'))return;
     uniqueTags={};lastScanTime={};bbScans=[];filterPasture='all';bbFound=false;bbActive=false;bbTarget='';
+    try{localStorage.removeItem(headCountSessionKey());}catch(e){}
     document.getElementById('headcountBanner').style.display='none';
     stopJawsHaptics();
     document.getElementById('bbStatus').className='bb-status';
