@@ -22,7 +22,7 @@ test('4528 accepted reads, 86 EPCs: UI and repeated writes are batched',()=>{
   const q=c.queueLoad();
   assert.equal(q.length,86);
   assert.equal(q.reduce((n,x)=>n+Number(x.record.readCount||0),0),4528);
-  runTimer(c,160);
+  runTimer(c,500);
   assert.equal(renders,1);assert.equal(stats,1);
 });
 test('Stop Capture ignores office EPCs, preserves saved data, then resumes',()=>{
@@ -57,4 +57,27 @@ test('repeat-count persistence stays pending until flush; unique remains durable
   assert.equal(c.queueLoad()[0].record.readCount,1);
   c.flushPendingReadUpdates();
   assert.equal(c.queueLoad()[0].record.readCount,2);
+});
+test('dense repeat stream defers queue rewrites for five seconds',()=>{
+  const c=offline();
+  c.processHCTag('740086010000141');
+  for(let i=0;i<1000;i++)c.processHCTag('740086010000141');
+  assert.equal(c.queueLoad()[0].record.readCount,1);
+  assert.equal(c.timers.filter(v=>v.ms===5000).length,1);
+  c.flushPendingReadUpdates();
+  assert.equal(c.queueLoad()[0].record.readCount,1001);
+});
+test('head-count journal restores tags only for the verified destination',()=>{
+  const c=offline();
+  c.processHCTag('740086010000141');
+  c.currentPasture='North Lot';
+  c.saveHeadCountSession();
+  c.uniqueTags={};c.currentPasture='';c.sessionId='new-session';
+  assert.equal(c.restoreHeadCountSession(),true);
+  assert.equal(Object.keys(c.uniqueTags).length,1);
+  assert.equal(c.currentPasture,'North Lot');
+  assert.equal(c.sessionId,'session-original');
+  c.sheetId='other-sheet';c.uniqueTags={};
+  assert.equal(c.restoreHeadCountSession(),false);
+  assert.equal(Object.keys(c.uniqueTags).length,0);
 });

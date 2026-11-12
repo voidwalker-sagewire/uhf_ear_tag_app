@@ -4,11 +4,11 @@ function section(a,b){const p=source.indexOf(a),q=source.indexOf(b,p+1);if(p<0||
 function scanner(extra={}){
   const storage=new Map(),timers=[],events={};
   const c=vm.createContext({Promise,String,Date,encodeURIComponent,console,
-    window:{addEventListener:(name,fn)=>events[name]=fn},navigator:{},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},
+    window:{addEventListener:(name,fn)=>events[name]=fn},navigator:{},localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
     document:{getElementById:()=>({className:''})},setTimeout:(fn,ms)=>{timers.push({fn,ms});return timers.length;},clearTimeout(){},
     DCC_SHEET_ID:'dcc-sheet',sheetId:'dcc-sheet',operationId:'dcc',operationName:'DCC',signedInEmail:'owner@example.com',sessionId:'session-original',
     accessToken:'fake',onboardingAccountEpoch:0,gatewayTenantMode:true,operationFeatures:{animal_lookup:true},
-    bbTarget:'',uniqueTags:{},currentPasture:'Barn',headCountPaused:false,lastGPS:null,
+    bbTarget:'',uniqueTags:{},currentPasture:'Barn',headCountPaused:false,filterPasture:'all',lastGPS:null,HC_SESSION_PREFIX:'hm_headcount_session_v1:',
     newHCID:()=> 'H-'+require('node:crypto').randomUUID(),newBeaconID:()=> 'B-'+require('node:crypto').randomUUID(),
     debugLog(){},setSheetsBar(){},renderTable(){},renderTabs(){},updateStats(){},updateHeadcountBanner(){},showToast(){},playScanTick(){},markAuthExpired(){},
     ...extra});
