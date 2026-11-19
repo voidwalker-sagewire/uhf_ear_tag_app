@@ -32,3 +32,13 @@ Deployment, release-signing, and automatic version-bump workflows are not manual
 Review this maintenance-only diff and available CI results before merging into `main`. Prepare a separate Ubuntu 26.04 compatibility test when migration is desired; do not remove this pin merely because the label migration completes. Existing product work orders and release/field acceptance states retain their authority.
 
 Source: https://github.blog/changelog/2026-09-17-ubuntu-26-generally-available-and-latest-migration/
+
+## Refresh — November 19, 2026
+
+- Current target: `main` at `b93831ad776db5168d7af4e67a9e9306d0fc2a0b`.
+- Rebuilt the maintenance tree from current main, preserving the newer scanner workspace, throughput and lookup repairs.
+- Application source, hardware SDK, product versions, and test-source files are unchanged.
+- Existing Node scanner/runtime suites and Python tenant-contract checks run in GitHub CI.
+- Exact verification status and run links are maintained in [PR #7](https://github.com/voidwalker-sagewire/uhf_ear_tag_app/pull/7).
+- No merge, installation, hardware operation, Play publication, or field acceptance is included.
+
